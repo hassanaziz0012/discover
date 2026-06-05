@@ -1,0 +1,21 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# NextJS
+.next
+node_modules
+*.tsbuildinfo
+
+# Cache
+discover_api/youtube/cache/
+
+# secrets
+.env
