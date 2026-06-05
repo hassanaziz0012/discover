@@ -396,7 +396,7 @@ export default function CreatorOutliersPage() {
                 </div>
                 <input
                   type="range"
-                  min="1.0"
+                  min="0.0"
                   max="15.0"
                   step="0.5"
                   value={minOutlier}

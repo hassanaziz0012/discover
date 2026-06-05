@@ -61,7 +61,7 @@ export default function FilterModal({
     { value: "6months", label: "6 Months" },
   ];
 
-  const outlierOptions = [1.5, 2, 5, 10, 20, 50];
+  const outlierOptions = [0, 1.5, 2, 5, 10, 20, 50];
 
   return (
     <div className="fixed inset-0 bg-black/55 backdrop-blur-md flex items-center justify-center z-[1000] p-4 animate-fade-in" onClick={onClose} role="dialog" aria-modal="true">

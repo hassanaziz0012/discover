@@ -80,59 +80,54 @@ def calculate_outliers(
     avg_views = sum(v.view_count for v in valid_views_videos) / len(valid_views_videos) if valid_views_videos else 0.0
     avg_likes = sum(v.like_count for v in valid_likes_videos) / len(valid_likes_videos) if valid_likes_videos else 0.0
 
-    # 5. Filter for outliers: higher-than-average views OR likes
+    # 5. Calculate outlier scores for all videos
     outlier_candidates = []
     now = datetime.now(timezone.utc)
 
     for v in videos:
-        # Determine if either metric exceeds average
-        has_higher_views = v.view_count is not None and v.view_count > avg_views
-        has_higher_likes = v.like_count is not None and v.like_count > avg_likes
+        # Calculate ratios
+        view_ratio = v.view_count / avg_views if (v.view_count is not None and avg_views > 0) else 0.0
+        like_ratio = v.like_count / avg_likes if (v.like_count is not None and avg_likes > 0) else 0.0
 
-        if has_higher_views or has_higher_likes:
-            # Calculate ratios
-            view_ratio = v.view_count / avg_views if (v.view_count is not None and avg_views > 0) else 0.0
-            like_ratio = v.like_count / avg_likes if (v.like_count is not None and avg_likes > 0) else 0.0
+        # Gather valid ratios to calculate average ratio
+        ratios = []
+        if v.view_count is not None and avg_views > 0:
+            ratios.append(view_ratio)
+        if v.like_count is not None and avg_likes > 0:
+            ratios.append(like_ratio)
 
-            # Gather valid ratios to calculate average ratio
-            ratios = []
-            if v.view_count is not None and avg_views > 0:
-                ratios.append(view_ratio)
-            if v.like_count is not None and avg_likes > 0:
-                ratios.append(like_ratio)
+        base_score = sum(ratios) / len(ratios) if ratios else 0.0
 
-            base_score = sum(ratios) / len(ratios) if ratios else 0.0
+        # Boost logic: Check if video was uploaded within X days ago
+        is_boosted = False
+        age_in_days = (now - v.published_at).total_seconds() / 86400.0
 
-            # Boost logic: Check if video was uploaded within X days ago
-            is_boosted = False
-            age_in_days = (now - v.published_at).total_seconds() / 86400.0
+        score = base_score
+        if days is not None:
+            if age_in_days <= days:
+                score = base_score * 1.10
+                is_boosted = True
 
-            score = base_score
-            if days is not None:
-                if age_in_days <= days:
-                    score = base_score * 1.10
-                    is_boosted = True
-
-            outlier_candidates.append({
-                "video_id": v.video_id,
-                "title": v.title,
-                "description": v.description,
-                "published_at": v.published_at.isoformat(),
-                "thumbnail_url": v.thumbnail_url,
-                "view_count": v.view_count,
-                "like_count": v.like_count,
-                "comment_count": v.comment_count,
-                "duration": v.duration,
-                "url": v.url,
-                "score": round(score, 4),
-                "base_score": round(base_score, 4),
-                "view_ratio": round(view_ratio, 4),
-                "like_ratio": round(like_ratio, 4),
-                "view_diff": int(v.view_count - avg_views) if v.view_count is not None else 0,
-                "like_diff": int(v.like_count - avg_likes) if v.like_count is not None else 0,
-                "age_in_days": round(age_in_days, 2),
-                "is_boosted": is_boosted
-            })
+        outlier_candidates.append({
+            "video_id": v.video_id,
+            "title": v.title,
+            "description": v.description,
+            "published_at": v.published_at.isoformat(),
+            "thumbnail_url": v.thumbnail_url,
+            "view_count": v.view_count,
+            "like_count": v.like_count,
+            "comment_count": v.comment_count,
+            "duration": v.duration,
+            "url": v.url,
+            "score": round(score, 4),
+            "base_score": round(base_score, 4),
+            "view_ratio": round(view_ratio, 4),
+            "like_ratio": round(like_ratio, 4),
+            "view_diff": int(v.view_count - avg_views) if v.view_count is not None else 0,
+            "like_diff": int(v.like_count - avg_likes) if v.like_count is not None else 0,
+            "age_in_days": round(age_in_days, 2),
+            "is_boosted": is_boosted
+        })
 
     # Sort outliers by final score in descending order
     outlier_candidates.sort(key=lambda item: item["score"], reverse=True)
@@ -225,55 +220,51 @@ def calculate_all_cached_outliers(
         avg_likes = sum(v.like_count for v in valid_likes_videos) / len(valid_likes_videos) if valid_likes_videos else 0.0
 
         for v in videos:
-            has_higher_views = v.view_count is not None and v.view_count > avg_views
-            has_higher_likes = v.like_count is not None and v.like_count > avg_likes
+            # Calculate ratios
+            view_ratio = v.view_count / avg_views if (v.view_count is not None and avg_views > 0) else 0.0
+            like_ratio = v.like_count / avg_likes if (v.like_count is not None and avg_likes > 0) else 0.0
 
-            if has_higher_views or has_higher_likes:
-                # Calculate ratios
-                view_ratio = v.view_count / avg_views if (v.view_count is not None and avg_views > 0) else 0.0
-                like_ratio = v.like_count / avg_likes if (v.like_count is not None and avg_likes > 0) else 0.0
+            ratios = []
+            if v.view_count is not None and avg_views > 0:
+                ratios.append(view_ratio)
+            if v.like_count is not None and avg_likes > 0:
+                ratios.append(like_ratio)
 
-                ratios = []
-                if v.view_count is not None and avg_views > 0:
-                    ratios.append(view_ratio)
-                if v.like_count is not None and avg_likes > 0:
-                    ratios.append(like_ratio)
+            base_score = sum(ratios) / len(ratios) if ratios else 0.0
 
-                base_score = sum(ratios) / len(ratios) if ratios else 0.0
+            is_boosted = False
+            age_in_days = (now - v.published_at).total_seconds() / 86400.0
 
-                is_boosted = False
-                age_in_days = (now - v.published_at).total_seconds() / 86400.0
+            score = base_score
+            if days is not None:
+                if age_in_days <= days:
+                    score = base_score * 1.10
+                    is_boosted = True
 
-                score = base_score
-                if days is not None:
-                    if age_in_days <= days:
-                        score = base_score * 1.10
-                        is_boosted = True
-
-                video_item = {
-                    "video_id": v.video_id,
-                    "title": v.title,
-                    "description": v.description,
-                    "published_at": v.published_at.isoformat(),
-                    "thumbnail_url": v.thumbnail_url,
-                    "view_count": v.view_count,
-                    "like_count": v.like_count,
-                    "comment_count": v.comment_count,
-                    "duration": v.duration,
-                    "url": v.url,
-                    "score": round(score, 4),
-                    "base_score": round(base_score, 4),
-                    "view_ratio": round(view_ratio, 4),
-                    "like_ratio": round(like_ratio, 4),
-                    "view_diff": int(v.view_count - avg_views) if v.view_count is not None else 0,
-                    "like_diff": int(v.like_count - avg_likes) if v.like_count is not None else 0,
-                    "age_in_days": round(age_in_days, 2),
-                    "is_boosted": is_boosted,
-                    "channel_id": channel_id,
-                    "channel_name": channel_name,
-                    "channel_avatar": channel_avatar,
-                }
-                all_outliers.append(video_item)
+            video_item = {
+                "video_id": v.video_id,
+                "title": v.title,
+                "description": v.description,
+                "published_at": v.published_at.isoformat(),
+                "thumbnail_url": v.thumbnail_url,
+                "view_count": v.view_count,
+                "like_count": v.like_count,
+                "comment_count": v.comment_count,
+                "duration": v.duration,
+                "url": v.url,
+                "score": round(score, 4),
+                "base_score": round(base_score, 4),
+                "view_ratio": round(view_ratio, 4),
+                "like_ratio": round(like_ratio, 4),
+                "view_diff": int(v.view_count - avg_views) if v.view_count is not None else 0,
+                "like_diff": int(v.like_count - avg_likes) if v.like_count is not None else 0,
+                "age_in_days": round(age_in_days, 2),
+                "is_boosted": is_boosted,
+                "channel_id": channel_id,
+                "channel_name": channel_name,
+                "channel_avatar": channel_avatar,
+            }
+            all_outliers.append(video_item)
 
     # Apply search filter
     if search:
