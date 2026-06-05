@@ -275,6 +275,93 @@ async def get_cached_creators_endpoint():
         raise HTTPException(status_code=500, detail=f"Failed to fetch cached creators: {e}")
 
 
+@router.post("/refresh-creators")
+async def refresh_creators():
+    """
+    Refresh all cached YouTube creators/channels by scanning the cache directory
+    and fetching any new uploads from the YouTube API for each channel (skipping
+    already cached videos).
+    """
+    try:
+        import os
+        import json
+        import asyncio
+        from youtube.cached_creators import cache_dir, get_cached_creators, metadata_file
+        
+        api_key = os.getenv("YOUTUBE_API_KEY")
+        if not api_key:
+            raise HTTPException(status_code=500, detail="YOUTUBE_API_KEY environment variable is not set.")
+
+        # 1. Scan directory for UC*.json files safely (conforming to regex / pattern constraints)
+        channel_ids = []
+        if cache_dir.exists():
+            for file in cache_dir.glob("UC*.json"):
+                name = file.stem
+                if len(name) == 24 and name.startswith("UC") and all(c.isalnum() or c in "-_" for c in name):
+                    channel_ids.append(name)
+        
+        if not channel_ids:
+            return {
+                "message": "No creators to refresh.",
+                "refreshed": [],
+                "errors": [],
+                "creators": []
+            }
+
+        # 2. Define a helper to refresh a single channel asynchronously
+        async def refresh_single_channel(cid: str):
+            try:
+                # fresh=False to skip already cached videos and only retrieve new uploads
+                videos = await asyncio.to_thread(fetch_channel_videos, api_key, cid, False)
+                return cid, len(videos), None
+            except Exception as ex:
+                logger.error(f"Error refreshing channel {cid}: {ex}", exc_info=True)
+                return cid, 0, str(ex)
+
+        # 3. Refresh each channel concurrently using thread pool
+        tasks = [refresh_single_channel(cid) for cid in channel_ids]
+        results = await asyncio.gather(*tasks)
+
+        # 4. After updating videos cache, force refresh metadata so statistics are updated
+        if metadata_file.exists():
+            try:
+                with open(metadata_file, "r", encoding="utf-8") as f:
+                    meta_data = json.load(f)
+                if isinstance(meta_data, dict):
+                    meta_data["updated_at"] = ""  # Force cache expiry
+                    with open(metadata_file, "w", encoding="utf-8") as f:
+                        json.dump(meta_data, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                logger.warning(f"Failed to reset metadata cache age: {e}")
+
+        # 5. Load updated creators metadata
+        updated_creators = get_cached_creators()
+
+        refreshed_list = []
+        errors = []
+        for cid, count, err in results:
+            if err:
+                errors.append({"channel_id": cid, "error": err})
+            else:
+                refreshed_list.append({"channel_id": cid, "video_count": count})
+
+        status_msg = f"Successfully refreshed {len(refreshed_list)} channels."
+        if errors:
+            status_msg += f" {len(errors)} channels failed to refresh."
+
+        return {
+            "message": status_msg,
+            "refreshed": refreshed_list,
+            "errors": errors,
+            "creators": updated_creators
+        }
+
+    except Exception as e:
+        logger.error(f"Unexpected error in refresh-creators: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
 @router.get("/all-outliers")
 async def get_all_outliers(
     page: int = Query(1, ge=1, description="Page number for pagination"),
