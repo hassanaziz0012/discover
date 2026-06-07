@@ -60,10 +60,59 @@ export default function Home() {
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
 
   // Configuration Filter States (Syncs to FilterModal)
-  const [platform, setPlatform] = useState("YouTube");
-  const [timeRange, setTimeRange] = useState("all");
-  const [minOutlier, setMinOutlier] = useState(1.5); // updated default to be 1.5x
-  const [sortBy, setSortBy] = useState("outlierScore");
+  const [platform, setPlatformState] = useState("YouTube");
+  const [timeRange, setTimeRangeState] = useState("all");
+  const [minOutlier, setMinOutlierState] = useState(1.5); // updated default to be 1.5x
+  const [sortBy, setSortByState] = useState("outlierScore");
+  const [isFiltersLoaded, setIsFiltersLoaded] = useState(false);
+
+  // Custom setters that update both state and localStorage
+  const setPlatform = (val: string) => {
+    setPlatformState(val);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("discover_platform", val);
+    }
+  };
+
+  const setTimeRange = (val: string) => {
+    setTimeRangeState(val);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("discover_timeRange", val);
+    }
+  };
+
+  const setMinOutlier = (val: number) => {
+    setMinOutlierState(val);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("discover_minOutlier", val.toString());
+    }
+  };
+
+  const setSortBy = (val: string) => {
+    setSortByState(val);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("discover_sortBy", val);
+    }
+  };
+
+  // Load saved filters on client mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedPlatform = localStorage.getItem("discover_platform");
+      const savedTimeRange = localStorage.getItem("discover_timeRange");
+      const savedMinOutlier = localStorage.getItem("discover_minOutlier");
+      const savedSortBy = localStorage.getItem("discover_sortBy");
+
+      if (savedPlatform) setPlatformState(savedPlatform);
+      if (savedTimeRange) setTimeRangeState(savedTimeRange);
+      if (savedMinOutlier) {
+        const parsed = parseFloat(savedMinOutlier);
+        if (!isNaN(parsed)) setMinOutlierState(parsed);
+      }
+      if (savedSortBy) setSortByState(savedSortBy);
+    }
+    setIsFiltersLoaded(true);
+  }, []);
 
   // Outliers Fetching States
   const [videos, setVideos] = useState<Video[]>([]);
@@ -247,16 +296,18 @@ export default function Home() {
 
   // Trigger reset & load page 1 when active tab, search, or configuration changes
   useEffect(() => {
+    if (!isFiltersLoaded) return; // Wait until filters are loaded from localStorage
+
     if (activeTab === "discover") {
       fetchOutliers(1, true);
     } else if (activeTab === "creators" && creators.length === 0) {
       fetchCreators();
     }
-  }, [activeTab, debouncedSearchQuery, minOutlier, timeRange, sortBy]);
+  }, [activeTab, debouncedSearchQuery, minOutlier, timeRange, sortBy, isFiltersLoaded]);
 
   // Infinite Scroll Trigger via Intersection Observer
   useEffect(() => {
-    if (!hasMore || isLoading || activeTab !== "discover") return;
+    if (!isFiltersLoaded || !hasMore || isLoading || activeTab !== "discover") return;
 
     const sentinel = document.getElementById("scroll-sentinel");
     if (!sentinel) return;
@@ -277,7 +328,7 @@ export default function Home() {
     return () => {
       observer.disconnect();
     };
-  }, [hasMore, isLoading, page, activeTab, debouncedSearchQuery, minOutlier, timeRange, sortBy]);
+  }, [hasMore, isLoading, page, activeTab, debouncedSearchQuery, minOutlier, timeRange, sortBy, isFiltersLoaded]);
 
   // Reset all filters to default
   const handleResetFilters = () => {
