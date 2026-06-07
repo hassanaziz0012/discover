@@ -11,7 +11,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union, Tuple, List
 
 from dotenv import load_dotenv
 
@@ -189,7 +189,7 @@ def fetch_video_details(youtube, video_ids: list[str]) -> list[Video]:
 
 # ── Core Pipeline ─────────────────────────────────────────────────────────────
 
-def fetch_channel_videos(api_key: str, channel_id: str, fresh: bool = False) -> list[Video]:
+def fetch_channel_videos(api_key: str, channel_id: str, fresh: bool = False, return_detailed: bool = False) -> Union[Tuple[List[Video], int, int], List[Video]]:
     """
     Full pipeline with caching: authenticate → find uploads playlist
     → check cache for channel_id → page uploads playlist (stopping early if hit cache)
@@ -272,4 +272,6 @@ def fetch_channel_videos(api_key: str, channel_id: str, fresh: bool = False) -> 
         logger.warning(f"      Warning: Failed to save cache to {cache_file.name} ({e})")
 
     logger.info(f"Done! Returning {len(all_videos)} Video objects.")
+    if return_detailed:
+        return all_videos, len(new_videos), len(cached_videos)
     return all_videos

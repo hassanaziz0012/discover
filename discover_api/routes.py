@@ -312,11 +312,13 @@ async def refresh_creators():
         async def refresh_single_channel(cid: str):
             try:
                 # fresh=False to skip already cached videos and only retrieve new uploads
-                videos = await asyncio.to_thread(fetch_channel_videos, api_key, cid, False)
-                return cid, len(videos), None
+                videos, new_count, cached_count = await asyncio.to_thread(
+                    fetch_channel_videos, api_key, cid, False, True
+                )
+                return cid, new_count, cached_count, None
             except Exception as ex:
                 logger.error(f"Error refreshing channel {cid}: {ex}", exc_info=True)
-                return cid, 0, str(ex)
+                return cid, 0, 0, str(ex)
 
         # 3. Refresh each channel concurrently using thread pool
         tasks = [refresh_single_channel(cid) for cid in channel_ids]
@@ -336,14 +338,22 @@ async def refresh_creators():
 
         # 5. Load updated creators metadata
         updated_creators = get_cached_creators()
+        creators_by_id = {c["channel_id"]: c for c in updated_creators}
 
         refreshed_list = []
         errors = []
-        for cid, count, err in results:
+        for cid, new_count, cached_count, err in results:
             if err:
                 errors.append({"channel_id": cid, "error": err})
             else:
-                refreshed_list.append({"channel_id": cid, "video_count": count})
+                creator_meta = creators_by_id.get(cid, {})
+                refreshed_list.append({
+                    "channel_id": cid,
+                    "channel_name": creator_meta.get("name") or "Unknown Channel",
+                    "thumbnail_url": creator_meta.get("thumbnail_url") or "",
+                    "new_videos_count": new_count,
+                    "cached_videos_count": cached_count
+                })
 
         status_msg = f"Successfully refreshed {len(refreshed_list)} channels."
         if errors:
