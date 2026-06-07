@@ -18,6 +18,7 @@ interface CreatorsListProps {
   isLoading: boolean;
   error: string | null;
   onRetry?: () => void;
+  layout?: "list" | "grid";
 }
 
 // Helper to format subscriber count (e.g., 17200000 -> 17.2M, 9700000 -> 9.7M)
@@ -41,7 +42,7 @@ function formatVideoCount(count: number): string {
   return count.toString();
 }
 
-export default function CreatorsList({ creators, isLoading, error, onRetry }: CreatorsListProps) {
+export default function CreatorsList({ creators, isLoading, error, onRetry, layout = "list" }: CreatorsListProps) {
   
   if (error) {
     return (
@@ -70,6 +71,31 @@ export default function CreatorsList({ creators, isLoading, error, onRetry }: Cr
   }
 
   if (isLoading) {
+    if (layout === "grid") {
+      return (
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 w-full animate-pulse my-4">
+          {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+            <div
+              key={i}
+              className="flex flex-col items-center p-5 bg-surface border border-border-subtle rounded-2xl"
+            >
+              <div className="w-20 h-20 rounded-full bg-surface-raised mb-4 shrink-0"></div>
+              <div className="w-full flex flex-col items-center gap-2">
+                <div className="h-5 w-2/3 bg-surface-raised rounded-md"></div>
+                <div className="h-3.5 w-1/2 bg-surface-raised rounded-md"></div>
+                <div className="h-3.5 w-full bg-surface-raised rounded-md mt-2"></div>
+                <div className="h-3.5 w-3/4 bg-surface-raised rounded-md"></div>
+                <div className="flex gap-4 mt-3">
+                  <div className="h-3.5 w-12 bg-surface-raised rounded-md"></div>
+                  <div className="h-3.5 w-12 bg-surface-raised rounded-md"></div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
     return (
       <div className="flex flex-col gap-4 w-full animate-pulse my-4">
         {[1, 2, 3].map((i) => (
@@ -115,16 +141,34 @@ export default function CreatorsList({ creators, isLoading, error, onRetry }: Cr
     );
   }
 
+  const isGrid = layout === "grid";
+
   return (
-    <div className="flex flex-col gap-4 w-full my-4 animate-fade-in">
+    <div
+      className={
+        isGrid
+          ? "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 w-full my-4 animate-fade-in"
+          : "flex flex-col gap-4 w-full my-4 animate-fade-in"
+      }
+    >
       {creators.map((creator) => (
         <Link
           key={creator.channel_id}
           href={`/creators/${encodeURIComponent(creator.channel_id)}/outliers`}
-          className="group flex items-center gap-5 sm:gap-6 p-5 sm:p-6 bg-surface border border-border-subtle rounded-2xl transition-all duration-200 ease-in-out hover:bg-surface-raised hover:-translate-y-0.5 hover:shadow-md hover:border-brand active:scale-[0.99]"
+          className={
+            isGrid
+              ? "group flex flex-col items-center text-center p-5 bg-surface border border-border-subtle rounded-2xl transition-all duration-200 ease-in-out hover:bg-surface-raised hover:-translate-y-1 hover:shadow-md hover:border-brand active:scale-[0.99] w-full min-w-0"
+              : "group flex items-center gap-5 sm:gap-6 p-5 sm:p-6 bg-surface border border-border-subtle rounded-2xl transition-all duration-200 ease-in-out hover:bg-surface-raised hover:-translate-y-0.5 hover:shadow-md hover:border-brand active:scale-[0.99]"
+          }
         >
           {/* Avatar Profile */}
-          <div className="relative w-16 h-16 sm:w-20 sm:h-20 shrink-0">
+          <div
+            className={
+              isGrid
+                ? "relative w-20 h-20 mb-3 shrink-0"
+                : "relative w-16 h-16 sm:w-20 sm:h-20 shrink-0"
+            }
+          >
             <img
               src={creator.thumbnail_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(creator.name)}`}
               alt={creator.name}
@@ -134,24 +178,60 @@ export default function CreatorsList({ creators, isLoading, error, onRetry }: Cr
           </div>
 
           {/* Details */}
-          <div className="flex-1 min-w-0 flex flex-col gap-1 sm:gap-1.5">
+          <div
+            className={
+              isGrid
+                ? "flex-1 w-full flex flex-col items-center gap-1.5 min-w-0"
+                : "flex-1 min-w-0 flex flex-col gap-1 sm:gap-1.5"
+            }
+          >
             {/* Title & Handle row */}
-            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-              <h3 className="text-base sm:text-lg font-bold text-primary tracking-tight transition-colors duration-150 group-hover:text-brand truncate max-w-[300px] sm:max-w-md">
+            <div
+              className={
+                isGrid
+                  ? "flex flex-col items-center w-full min-w-0 gap-0.5"
+                  : "flex flex-wrap items-baseline gap-x-2 gap-y-0.5"
+              }
+            >
+              <h3
+                className={
+                  isGrid
+                    ? "text-base font-bold text-primary tracking-tight transition-colors duration-150 group-hover:text-brand truncate w-full px-1"
+                    : "text-base sm:text-lg font-bold text-primary tracking-tight transition-colors duration-150 group-hover:text-brand truncate max-w-[300px] sm:max-w-md"
+                }
+              >
                 {creator.name}
               </h3>
-              <span className="text-xs sm:text-[0.85rem] font-medium text-secondary truncate max-w-[150px]">
+              <span
+                className={
+                  isGrid
+                    ? "text-xs font-medium text-secondary truncate w-full px-1"
+                    : "text-xs sm:text-[0.85rem] font-medium text-secondary truncate max-w-[150px]"
+                }
+              >
                 {creator.handle}
               </span>
             </div>
 
             {/* Description Snippet */}
-            <p className="text-[0.82rem] sm:text-[0.88rem] leading-relaxed text-secondary line-clamp-2 overflow-hidden text-ellipsis pr-2">
+            <p
+              className={
+                isGrid
+                  ? "text-[0.82rem] leading-relaxed text-secondary line-clamp-2 overflow-hidden text-ellipsis w-full px-1"
+                  : "text-[0.82rem] sm:text-[0.88rem] leading-relaxed text-secondary line-clamp-2 overflow-hidden text-ellipsis pr-2"
+              }
+            >
               {creator.description || "No description provided."}
             </p>
 
             {/* Stats Block */}
-            <div className="flex items-center gap-4 mt-0.5 sm:mt-1 text-[0.78rem] sm:text-[0.82rem] font-semibold text-secondary">
+            <div
+              className={
+                isGrid
+                  ? "flex items-center justify-center gap-4 mt-auto pt-2 text-[0.78rem] font-semibold text-secondary w-full"
+                  : "flex items-center gap-4 mt-0.5 sm:mt-1 text-[0.78rem] sm:text-[0.82rem] font-semibold text-secondary"
+              }
+            >
               {/* Subs Stats */}
               <span className="inline-flex items-center gap-1.5 transition-colors duration-150 group-hover:text-primary">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="opacity-75">
@@ -170,11 +250,13 @@ export default function CreatorsList({ creators, isLoading, error, onRetry }: Cr
           </div>
 
           {/* Nav arrow indicator shown on hover */}
-          <div className="text-disabled group-hover:text-brand transition-colors duration-200 pl-2 shrink-0 hidden sm:block">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="transition-transform duration-200 group-hover:translate-x-1">
-              <polyline points="9 18 15 12 9 6"></polyline>
-            </svg>
-          </div>
+          {!isGrid && (
+            <div className="text-disabled group-hover:text-brand transition-colors duration-200 pl-2 shrink-0 hidden sm:block">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="transition-transform duration-200 group-hover:translate-x-1">
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            </div>
+          )}
         </Link>
       ))}
     </div>

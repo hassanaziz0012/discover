@@ -7,6 +7,7 @@ import VideoGrid from "./components/VideoGrid";
 import FilterModal from "./components/FilterModal";
 import CreatorsList, { Creator } from "./components/CreatorsList";
 import { Video } from "./types/video";
+import RefreshReportModal, { RefreshReport } from "./components/RefreshReportModal";
 
 const API_BASE_URL = "http://localhost:8000";
 
@@ -95,6 +96,15 @@ export default function Home() {
     }
   };
 
+  const [creatorsLayout, setCreatorsLayoutState] = useState<"list" | "grid">("list");
+
+  const setCreatorsLayout = (val: "list" | "grid") => {
+    setCreatorsLayoutState(val);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("discover_creatorsLayout", val);
+    }
+  };
+
   // Load saved filters on client mount
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -102,6 +112,7 @@ export default function Home() {
       const savedTimeRange = localStorage.getItem("discover_timeRange");
       const savedMinOutlier = localStorage.getItem("discover_minOutlier");
       const savedSortBy = localStorage.getItem("discover_sortBy");
+      const savedCreatorsLayout = localStorage.getItem("discover_creatorsLayout");
 
       if (savedPlatform) setPlatformState(savedPlatform);
       if (savedTimeRange) setTimeRangeState(savedTimeRange);
@@ -110,6 +121,9 @@ export default function Home() {
         if (!isNaN(parsed)) setMinOutlierState(parsed);
       }
       if (savedSortBy) setSortByState(savedSortBy);
+      if (savedCreatorsLayout === "list" || savedCreatorsLayout === "grid") {
+        setCreatorsLayoutState(savedCreatorsLayout);
+      }
     }
     setIsFiltersLoaded(true);
   }, []);
@@ -166,6 +180,8 @@ export default function Home() {
   // Refresh Creators States
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshStatus, setRefreshStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [isRefreshModalOpen, setIsRefreshModalOpen] = useState(false);
+  const [refreshReport, setRefreshReport] = useState<RefreshReport | null>(null);
 
   const handleRefreshCreators = async () => {
     if (isRefreshing) return;
@@ -180,10 +196,12 @@ export default function Home() {
         if (data.creators) {
           setCreators(data.creators);
         }
-        setRefreshStatus({
-          type: "success",
+        setRefreshReport({
           message: data.message || "Successfully refreshed all channels.",
+          refreshed: data.refreshed || [],
+          errors: data.errors || [],
         });
+        setIsRefreshModalOpen(true);
       } else {
         const errJson = await response.json().catch(() => ({}));
         setRefreshStatus({
@@ -373,25 +391,67 @@ export default function Home() {
                   <h2 className="text-lg font-bold text-primary">
                     Cached Creators
                   </h2>
-                  <button
-                    onClick={handleRefreshCreators}
-                    disabled={isRefreshing}
-                    className={`flex items-center gap-2 px-4 py-2 text-[0.82rem] font-bold rounded-full border border-border-subtle bg-surface-raised text-primary hover:bg-surface-overlay hover:border-brand active:scale-[0.98] transition-all duration-150 ease-in-out shadow-xs select-none ${
-                      isRefreshing ? "opacity-50 cursor-not-allowed" : ""
-                    }`}
-                    title="Refresh all creators"
-                  >
-                    <svg
-                      className={`w-4 h-4 ${isRefreshing ? "animate-spin text-brand" : "text-secondary hover:text-brand"}`}
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.5"
+                  <div className="flex items-center gap-2">
+                    {/* Layout Toggles */}
+                    <div className="flex items-center bg-surface-raised border border-border-subtle p-0.5 rounded-full shadow-xs">
+                      <button
+                        onClick={() => setCreatorsLayout("list")}
+                        className={`p-1.5 rounded-full transition-all duration-150 ${
+                          creatorsLayout === "list"
+                            ? "bg-brand text-on-brand shadow-xs"
+                            : "text-secondary hover:text-primary hover:bg-surface-overlay"
+                        }`}
+                        title="List View"
+                        aria-label="List View"
+                      >
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                          <line x1="8" y1="6" x2="21" y2="6"></line>
+                          <line x1="8" y1="12" x2="21" y2="12"></line>
+                          <line x1="8" y1="18" x2="21" y2="18"></line>
+                          <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                          <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                          <line x1="3" y1="18" x2="3.01" y2="18"></line>
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => setCreatorsLayout("grid")}
+                        className={`p-1.5 rounded-full transition-all duration-150 ${
+                          creatorsLayout === "grid"
+                            ? "bg-brand text-on-brand shadow-xs"
+                            : "text-secondary hover:text-primary hover:bg-surface-overlay"
+                        }`}
+                        title="Grid View"
+                        aria-label="Grid View"
+                      >
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                          <rect x="3" y="3" width="7" height="7"></rect>
+                          <rect x="14" y="3" width="7" height="7"></rect>
+                          <rect x="14" y="14" width="7" height="7"></rect>
+                          <rect x="3" y="14" width="7" height="7"></rect>
+                        </svg>
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={handleRefreshCreators}
+                      disabled={isRefreshing}
+                      className={`flex items-center gap-2 px-4 py-2 text-[0.82rem] font-bold rounded-full border border-border-subtle bg-surface-raised text-primary hover:bg-surface-overlay hover:border-brand active:scale-[0.98] transition-all duration-150 ease-in-out shadow-xs select-none ${
+                        isRefreshing ? "opacity-50 cursor-not-allowed" : ""
+                      }`}
+                      title="Refresh all creators"
                     >
-                      <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
-                    </svg>
-                    {isRefreshing ? "Refreshing Channels..." : "Refresh Channels"}
-                  </button>
+                      <svg
+                        className={`w-4 h-4 ${isRefreshing ? "animate-spin text-brand" : "text-secondary hover:text-brand"}`}
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                      >
+                        <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+                      </svg>
+                      {isRefreshing ? "Refreshing Channels..." : "Refresh Channels"}
+                    </button>
+                  </div>
                 </div>
 
                 {refreshStatus && (
@@ -458,6 +518,7 @@ export default function Home() {
               isLoading={creatorsLoading}
               error={creatorsError}
               onRetry={fetchCreators}
+              layout={creatorsLayout}
             />
           </>
         ) : activeTab === "mylists" ? (
@@ -515,6 +576,13 @@ export default function Home() {
         setMinOutlier={setMinOutlier}
         sortBy={sortBy}
         setSortBy={setSortBy}
+      />
+
+      {/* Refresh Report Modal */}
+      <RefreshReportModal
+        isOpen={isRefreshModalOpen}
+        onClose={() => setIsRefreshModalOpen(false)}
+        report={refreshReport}
       />
     </div>
   );
