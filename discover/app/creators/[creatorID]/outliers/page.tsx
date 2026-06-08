@@ -28,6 +28,7 @@ interface ApiOutlier {
   like_diff: number;
   age_in_days: number;
   is_boosted: boolean;
+  is_short?: boolean;
 }
 
 interface ApiResponse {
@@ -53,6 +54,7 @@ export default function CreatorOutliersPage() {
   // Dynamic Query Parameter States (passed to backend API)
   const [daysBoost, setDaysBoost] = useState<string>("30"); // Recency boost time-frame cutoff (default 30 days)
   const [limit, setLimit] = useState<string>("30"); // Max videos retrieved from YouTube API
+  const [excludeShorts, setExcludeShorts] = useState<boolean>(false);
 
   // Client-side Filter States (applied locally to the fetched results)
   const [searchQuery, setSearchQuery] = useState("");
@@ -62,6 +64,21 @@ export default function CreatorOutliersPage() {
   // Clipboard copy feedback
   const [isCopied, setIsCopied] = useState(false);
 
+  // Sync saved excludeShorts filter on client mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("creator_excludeShorts");
+      if (saved) setExcludeShorts(saved === "true");
+    }
+  }, []);
+
+  const handleSetExcludeShorts = (val: boolean) => {
+    setExcludeShorts(val);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("creator_excludeShorts", val.toString());
+    }
+  };
+
   // Fetch data function
   const fetchOutliers = async () => {
     if (!creatorID) return;
@@ -70,8 +87,9 @@ export default function CreatorOutliersPage() {
     try {
       const daysQuery = daysBoost ? `&days=${encodeURIComponent(daysBoost)}` : "";
       const limitQuery = limit && limit !== "all" ? `&limit=${encodeURIComponent(limit)}` : "";
+      const excludeShortsQuery = excludeShorts ? `&exclude_shorts=true` : "";
       const response = await fetch(
-        `${API_BASE_URL}/api/youtube/fetch-outliers?channel=${encodeURIComponent(creatorID)}${daysQuery}${limitQuery}`
+        `${API_BASE_URL}/api/youtube/fetch-outliers?channel=${encodeURIComponent(creatorID)}${daysQuery}${limitQuery}${excludeShortsQuery}`
       );
       if (response.ok) {
         const json = await response.json();
@@ -91,7 +109,7 @@ export default function CreatorOutliersPage() {
   // Trigger fetch when dynamic query params change
   useEffect(() => {
     fetchOutliers();
-  }, [creatorID, daysBoost, limit]);
+  }, [creatorID, daysBoost, limit, excludeShorts]);
 
   // Handle Copy Channel ID
   const handleCopyChannelId = () => {
@@ -107,6 +125,7 @@ export default function CreatorOutliersPage() {
     setSearchQuery("");
     setMinOutlier(1.5);
     setSortBy("outlierScore");
+    handleSetExcludeShorts(false);
   };
 
   // Client-side filtering & sorting pipeline
@@ -128,6 +147,7 @@ export default function CreatorOutliersPage() {
       thumbnailUrl: o.thumbnail_url,
       category: "Creators",
       youtubeUrl: o.url,
+      isShort: o.is_short,
     }));
 
     // 1. Search Query Filter
@@ -138,6 +158,11 @@ export default function CreatorOutliersPage() {
 
     // 2. Outlier Score Threshold Filter
     mapped = mapped.filter((v) => v.outlierScore >= minOutlier);
+
+    // 2.5. Exclude Shorts Filter
+    if (excludeShorts) {
+      mapped = mapped.filter((v) => !v.isShort);
+    }
 
     // 3. Sorting pipeline
     mapped.sort((a, b) => {
@@ -325,7 +350,7 @@ export default function CreatorOutliersPage() {
 
           {/* Filtering Configuration Panel Card */}
           <section className="bg-surface border border-border-subtle rounded-2xl p-5 mb-8 shadow-xs">
-            <div className="grid lg:grid-cols-5 md:grid-cols-3 sm:grid-cols-2 grid-cols-1 gap-5">
+            <div className="grid lg:grid-cols-6 md:grid-cols-3 sm:grid-cols-2 grid-cols-1 gap-5">
               {/* Local Video Title Search */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[0.75rem] font-bold text-secondary uppercase tracking-wider">Search Videos</label>
@@ -395,6 +420,30 @@ export default function CreatorOutliersPage() {
                   <option value="100">Top 100 uploads</option>
                   <option value="all">All videos (No limit)</option>
                 </select>
+              </div>
+
+              {/* YouTube Shorts Exclude Toggle Switch */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[0.75rem] font-bold text-secondary uppercase tracking-wider">YouTube Shorts</label>
+                <button
+                  onClick={() => handleSetExcludeShorts(!excludeShorts)}
+                  className={`flex items-center justify-between bg-surface-raised border border-border-subtle rounded-lg px-3 py-2.5 text-[0.88rem] font-semibold transition-all duration-150 cursor-pointer ${
+                    excludeShorts 
+                      ? "text-brand border-brand/50 bg-brand-subtle/20" 
+                      : "text-primary hover:bg-surface-overlay"
+                  }`}
+                >
+                  <span>Hide Shorts</span>
+                  <div className="relative inline-flex items-center">
+                    <div className={`w-8 h-4.5 rounded-full transition-colors ${
+                      excludeShorts ? "bg-brand" : "bg-secondary/30"
+                    } relative`}>
+                      <div className={`absolute top-[2px] left-[2px] bg-surface w-3.5 h-3.5 rounded-full transition-transform ${
+                        excludeShorts ? "translate-x-3.5 bg-on-brand" : "translate-x-0"
+                      }`} />
+                    </div>
+                  </div>
+                </button>
               </div>
 
               {/* Local Sorting option selector */}

@@ -25,6 +25,7 @@ export default function Home() {
   const [timeRange, setTimeRangeState] = useState("all");
   const [minOutlier, setMinOutlierState] = useState(1.5); // updated default to be 1.5x
   const [sortBy, setSortByState] = useState("outlierScore");
+  const [excludeShorts, setExcludeShortsState] = useState(false);
   const [isFiltersLoaded, setIsFiltersLoaded] = useState(false);
 
   // Custom setters that update both state and localStorage
@@ -56,6 +57,13 @@ export default function Home() {
     }
   };
 
+  const setExcludeShorts = (val: boolean) => {
+    setExcludeShortsState(val);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("discover_excludeShorts", val.toString());
+    }
+  };
+
   const [creatorsLayout, setCreatorsLayoutState] = useState<"list" | "grid">("list");
 
   const setCreatorsLayout = (val: "list" | "grid") => {
@@ -72,6 +80,7 @@ export default function Home() {
       const savedTimeRange = localStorage.getItem("discover_timeRange");
       const savedMinOutlier = localStorage.getItem("discover_minOutlier");
       const savedSortBy = localStorage.getItem("discover_sortBy");
+      const savedExcludeShorts = localStorage.getItem("discover_excludeShorts");
       const savedCreatorsLayout = localStorage.getItem("discover_creatorsLayout");
 
       if (savedPlatform) setPlatformState(savedPlatform);
@@ -81,6 +90,7 @@ export default function Home() {
         if (!isNaN(parsed)) setMinOutlierState(parsed);
       }
       if (savedSortBy) setSortByState(savedSortBy);
+      if (savedExcludeShorts) setExcludeShortsState(savedExcludeShorts === "true");
       if (savedCreatorsLayout === "list" || savedCreatorsLayout === "grid") {
         setCreatorsLayoutState(savedCreatorsLayout);
       }
@@ -223,6 +233,9 @@ export default function Home() {
       if (timeRange && timeRange !== "all") {
         queryParams.append("time_range", timeRange);
       }
+      if (excludeShorts) {
+        queryParams.append("exclude_shorts", "true");
+      }
 
       // Default days boost mapping if time range is specified
       if (timeRange && timeRange !== "all") {
@@ -281,7 +294,7 @@ export default function Home() {
     } else if (activeTab === "creators" && creators.length === 0) {
       fetchCreators();
     }
-  }, [activeTab, debouncedSearchQuery, minOutlier, timeRange, sortBy, isFiltersLoaded]);
+  }, [activeTab, debouncedSearchQuery, minOutlier, timeRange, sortBy, excludeShorts, isFiltersLoaded]);
 
   // Infinite Scroll Trigger via Intersection Observer
   useEffect(() => {
@@ -306,7 +319,7 @@ export default function Home() {
     return () => {
       observer.disconnect();
     };
-  }, [hasMore, isLoading, page, activeTab, debouncedSearchQuery, minOutlier, timeRange, sortBy, isFiltersLoaded]);
+  }, [hasMore, isLoading, page, activeTab, debouncedSearchQuery, minOutlier, timeRange, sortBy, excludeShorts, isFiltersLoaded]);
 
   // Reset all filters to default
   const handleResetFilters = () => {
@@ -315,6 +328,7 @@ export default function Home() {
     setTimeRange("all");
     setMinOutlier(1.5);
     setSortBy("outlierScore");
+    setExcludeShorts(false);
   };
 
   // High-fidelity search filter for cached creators
@@ -336,6 +350,7 @@ export default function Home() {
         activePlatform={platform}
         activeTimeRange={timeRange}
         activeMinOutlier={minOutlier}
+        activeExcludeShorts={excludeShorts}
       />
 
       {/* Tab Horizontal Navigation (Discover, Creators, My Lists) */}
@@ -402,6 +417,8 @@ export default function Home() {
         setMinOutlier={setMinOutlier}
         sortBy={sortBy}
         setSortBy={setSortBy}
+        excludeShorts={excludeShorts}
+        setExcludeShorts={setExcludeShorts}
       />
 
       {/* Refresh Report Modal */}

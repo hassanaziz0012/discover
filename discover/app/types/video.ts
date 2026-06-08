@@ -12,4 +12,5 @@ export interface Video {
   thumbnailUrl: string;
   category: string;
   youtubeUrl: string;
+  isShort?: boolean;
 }

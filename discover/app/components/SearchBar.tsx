@@ -14,6 +14,7 @@ interface SearchBarProps {
   activePlatform: string;
   activeTimeRange: string;
   activeMinOutlier: number;
+  activeExcludeShorts?: boolean;
 }
 
 interface Creator {
@@ -30,6 +31,7 @@ export default function SearchBar({
   activePlatform,
   activeTimeRange,
   activeMinOutlier,
+  activeExcludeShorts,
 }: SearchBarProps) {
   const router = useRouter();
   const [creatorResults, setCreatorResults] = useState<Creator[]>([]);
@@ -143,7 +145,7 @@ export default function SearchBar({
             </svg>
           </span>
           <span className="sm:max-w-none max-w-[90px] overflow-hidden text-ellipsis">
-            {activePlatform} <span className="opacity-40 mx-0.5 sm:inline-block hidden">•</span> {formatTimeRange(activeTimeRange)} <span className="opacity-40 mx-0.5 sm:inline-block hidden">•</span> {activeMinOutlier}x
+            {activePlatform} <span className="opacity-40 mx-0.5 sm:inline-block hidden">•</span> {formatTimeRange(activeTimeRange)} <span className="opacity-40 mx-0.5 sm:inline-block hidden">•</span> {activeMinOutlier}x{activeExcludeShorts ? <span className="sm:inline-block hidden"><span className="opacity-40 mx-0.5">•</span> Hide Shorts</span> : null}
           </span>
           <span className="flex items-center opacity-70 shrink-0">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">

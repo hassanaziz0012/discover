@@ -13,6 +13,8 @@ interface FilterModalProps {
   setMinOutlier: (m: number) => void;
   sortBy: string;
   setSortBy: (s: string) => void;
+  excludeShorts: boolean;
+  setExcludeShorts: (e: boolean) => void;
 }
 
 export default function FilterModal({
@@ -26,12 +28,15 @@ export default function FilterModal({
   setMinOutlier,
   sortBy,
   setSortBy,
+  excludeShorts,
+  setExcludeShorts,
 }: FilterModalProps) {
   // Local state so changes only apply on hitting 'Save'
   const [localPlatform, setLocalPlatform] = useState(platform);
   const [localTimeRange, setLocalTimeRange] = useState(timeRange);
   const [localMinOutlier, setLocalMinOutlier] = useState(minOutlier);
   const [localSortBy, setLocalSortBy] = useState(sortBy);
+  const [localExcludeShorts, setLocalExcludeShorts] = useState(excludeShorts);
 
   // Sync state when modal is opened
   useEffect(() => {
@@ -40,8 +45,9 @@ export default function FilterModal({
       setLocalTimeRange(timeRange);
       setLocalMinOutlier(minOutlier);
       setLocalSortBy(sortBy);
+      setLocalExcludeShorts(excludeShorts);
     }
-  }, [isOpen, platform, timeRange, minOutlier, sortBy]);
+  }, [isOpen, platform, timeRange, minOutlier, sortBy, excludeShorts]);
 
   if (!isOpen) return null;
 
@@ -50,6 +56,7 @@ export default function FilterModal({
     setTimeRange(localTimeRange);
     setMinOutlier(localMinOutlier);
     setSortBy(localSortBy);
+    setExcludeShorts(localExcludeShorts);
     onClose();
   };
 
@@ -139,6 +146,28 @@ export default function FilterModal({
             <p className="text-[0.75rem] text-secondary leading-[1.4]">
               Filters videos whose performance is at least {localMinOutlier}x above channel averages.
             </p>
+          </div>
+
+          {/* Section: Hide YouTube Shorts Toggle */}
+          <div className="flex items-center justify-between p-4 bg-surface-raised rounded-md border border-border-subtle hover:bg-surface-overlay transition-all duration-150">
+            <div className="flex flex-col gap-1 pr-4">
+              <label className="text-[0.92rem] font-bold text-primary cursor-pointer select-none" htmlFor="checkbox-exclude-shorts">
+                Hide YouTube Shorts
+              </label>
+              <p className="text-[0.75rem] text-secondary leading-[1.4]">
+                Filter out short vertical videos (YouTube Shorts) from the Discover feed.
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                id="checkbox-exclude-shorts"
+                checked={localExcludeShorts}
+                onChange={(e) => setLocalExcludeShorts(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-surface-overlay border border-border-subtle rounded-full peer peer-focus:ring-2 peer-focus:ring-brand-subtle peer-checked:bg-brand peer-checked:border-brand after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-secondary after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full peer-checked:after:bg-on-brand peer-checked:after:border-brand cursor-pointer"></div>
+            </label>
           </div>
 
           {/* Section: Sorting */}
