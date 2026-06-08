@@ -19,10 +19,7 @@ export default function CreatorsHeader({
 }: CreatorsHeaderProps) {
   return (
     <div className="flex flex-col gap-3 mb-4 mt-6">
-      <div className="flex justify-between items-center px-1">
-        <h2 className="text-lg font-bold text-primary">
-          Cached Creators
-        </h2>
+      <div className="flex justify-end items-center px-1">
         <div className="flex items-center gap-2">
           {/* Layout Toggles */}
           <div className="flex items-center bg-surface-raised border border-border-subtle p-0.5 rounded-full shadow-xs">
