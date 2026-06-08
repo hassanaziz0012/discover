@@ -23,15 +23,15 @@ export default function TabNavigation({ activeTab, setActiveTab }: TabNavigation
               <button
                 id={`tab-btn-${tab.id}`}
                 onClick={() => setActiveTab(tab.id)}
-                className={`bg-transparent border-none text-[1.2rem] sm:text-2xl pt-1.5 px-0.5 pb-2.5 sm:pt-2 sm:px-1 sm:pb-[14px] text-secondary tracking-[-0.02em] transition-all duration-150 ease-in-out hover:text-primary hover:-translate-y-[1px] ${
-                  isActive ? "text-primary font-bold" : "font-medium"
+                className={`bg-transparent border-none text-[1.2rem] sm:text-2xl pt-1.5 px-0.5 pb-2.5 sm:pt-2 sm:px-1 sm:pb-[14px] tracking-[-0.02em] transition-all duration-150 ease-in-out hover:text-brand hover:-translate-y-[1px] ${
+                  isActive ? "text-brand font-bold" : "text-secondary font-medium"
                 }`}
                 aria-selected={isActive}
                 role="tab"
               >
                 {tab.label}
               </button>
-              {isActive && <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-primary rounded-t-[3px] animate-slide-in" layout-id="underline" />}
+              {isActive && <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-brand rounded-t-[3px] animate-slide-in" layout-id="underline" />}
             </li>
           );
         })}
