@@ -130,7 +130,7 @@ export default function SearchBar({
               setShowDropdown(true);
             }
           }}
-          placeholder="Search videos, creators or lists..."
+          placeholder="Search videos, channels or lists..."
           className="flex-1 bg-transparent border-none py-2 px-0 text-base text-primary w-full placeholder-disabled sm:text-base text-[0.95rem] outline-none focus:outline-none"
         />
         <button
