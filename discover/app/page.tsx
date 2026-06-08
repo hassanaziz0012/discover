@@ -7,9 +7,13 @@ import VideoGrid from "./components/VideoGrid";
 import FilterModal from "./components/FilterModal";
 import CreatorsList, { Creator } from "./components/CreatorsList";
 import { Video } from "./types/video";
+import { UserList } from "./types/list";
+import ManageListsModal from "./components/ManageListsModal";
+import EditListModal from "./components/EditListModal";
 import RefreshReportModal, { RefreshReport } from "./components/RefreshReportModal";
 import CreatorsHeader from "./components/CreatorsHeader";
 import LoadingFooter from "./components/LoadingFooter";
+import ListPills from "./components/ListPills";
 import { formatViews, formatDuration, timeAgo } from "./utils/format";
 
 const API_BASE_URL = "http://localhost:8000";
@@ -18,7 +22,13 @@ export default function Home() {
   // Navigation & Filtering States
   const [activeTab, setActiveTab] = useState("discover");
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Lists States
+  const [lists, setLists] = useState<UserList[]>([]);
+  const [selectedListId, setSelectedListId] = useState<string>("all");
+  const [activeManageListCreator, setActiveManageListCreator] = useState<Creator | null>(null);
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
+  const [isEditListModalOpen, setIsEditListModalOpen] = useState(false);
 
   // Configuration Filter States (Syncs to FilterModal)
   const [platform, setPlatformState] = useState("YouTube");
@@ -96,6 +106,8 @@ export default function Home() {
       }
     }
     setIsFiltersLoaded(true);
+    fetchLists();
+    fetchCreators();
   }, []);
 
   // Outliers Fetching States
@@ -127,7 +139,7 @@ export default function Home() {
   }, [searchQuery]);
 
   // Fetch cached creators from backend API
-  const fetchCreators = async () => {
+  async function fetchCreators() {
     setCreatorsLoading(true);
     setCreatorsError(null);
     try {
@@ -145,7 +157,7 @@ export default function Home() {
     } finally {
       setCreatorsLoading(false);
     }
-  };
+  }
 
   // Refresh Creators States
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -201,7 +213,7 @@ export default function Home() {
   }, [refreshStatus]);
 
   // Fetch Outliers from Backend
-  const fetchOutliers = async (pageToFetch: number, isReset: boolean) => {
+  async function fetchOutliers(pageToFetch: number, isReset: boolean) {
     if (isLoading) return;
 
     // Prevent fetching the same page number concurrently or repeatedly unless it is a reset
@@ -235,6 +247,9 @@ export default function Home() {
       }
       if (excludeShorts) {
         queryParams.append("exclude_shorts", "true");
+      }
+      if (selectedListId && selectedListId !== "all") {
+        queryParams.append("list", selectedListId);
       }
 
       // Default days boost mapping if time range is specified
@@ -283,6 +298,90 @@ export default function Home() {
     } finally {
       setIsLoading(false);
     }
+  }
+
+  // Fetch customized lists from backend API
+  async function fetchLists() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/youtube/lists`);
+      if (response.ok) {
+        const data = await response.json();
+        setLists(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch lists:", err);
+    }
+  }
+
+  // Create new list in backend
+  const handleCreateList = async (name: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/youtube/lists`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (response.ok) {
+      const newList = await response.json();
+      setLists((prev) => [...prev, newList]);
+    } else {
+      const errJson = await response.json().catch(() => ({}));
+      throw new Error(errJson.detail || "Failed to create list.");
+    }
+  };
+
+  // Toggle channel in list (Add/Remove)
+  const handleToggleListChannel = async (listId: string, channelId: string, isChecked: boolean) => {
+    let response;
+    if (isChecked) {
+      response = await fetch(`${API_BASE_URL}/api/youtube/lists/${listId}/channels`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel_id: channelId }),
+      });
+    } else {
+      response = await fetch(`${API_BASE_URL}/api/youtube/lists/${listId}/channels/${channelId}`, {
+        method: "DELETE",
+      });
+    }
+
+    if (response.ok) {
+      fetchLists();
+    } else {
+      const errJson = await response.json().catch(() => ({}));
+      throw new Error(errJson.detail || "Failed to update list membership.");
+    }
+  };
+
+  // Delete list
+  const handleDeleteList = async (listId: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/youtube/lists/${listId}`, {
+      method: "DELETE",
+    });
+    if (response.ok) {
+      if (selectedListId === listId) {
+        setSelectedListId("all");
+      }
+      setLists((prev) => prev.filter((l) => l.id !== listId));
+    } else {
+      const errJson = await response.json().catch(() => ({}));
+      throw new Error(errJson.detail || "Failed to delete list.");
+    }
+  };
+
+  // Update list name and channels
+  const handleUpdateList = async (listId: string, name: string, channelIds: string[]) => {
+    const response = await fetch(`${API_BASE_URL}/api/youtube/lists/${listId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, channels: channelIds }),
+    });
+    if (response.ok) {
+      const updatedList = await response.json();
+      setLists((prev) => prev.map((l) => (l.id === listId ? updatedList : l)));
+    } else {
+      const errJson = await response.json().catch(() => ({}));
+      throw new Error(errJson.detail || "Failed to update list.");
+    }
   };
 
   // Trigger reset & load page 1 when active tab, search, or configuration changes
@@ -291,10 +390,13 @@ export default function Home() {
 
     if (activeTab === "discover") {
       fetchOutliers(1, true);
-    } else if (activeTab === "creators" && creators.length === 0) {
-      fetchCreators();
+    } else if (activeTab === "creators") {
+      if (creators.length === 0) {
+        fetchCreators();
+      }
+      fetchLists();
     }
-  }, [activeTab, debouncedSearchQuery, minOutlier, timeRange, sortBy, excludeShorts, isFiltersLoaded]);
+  }, [activeTab, debouncedSearchQuery, minOutlier, timeRange, sortBy, excludeShorts, selectedListId, isFiltersLoaded]);
 
   // Infinite Scroll Trigger via Intersection Observer
   useEffect(() => {
@@ -319,7 +421,7 @@ export default function Home() {
     return () => {
       observer.disconnect();
     };
-  }, [hasMore, isLoading, page, activeTab, debouncedSearchQuery, minOutlier, timeRange, sortBy, excludeShorts, isFiltersLoaded]);
+  }, [hasMore, isLoading, page, activeTab, debouncedSearchQuery, minOutlier, timeRange, sortBy, excludeShorts, selectedListId, isFiltersLoaded]);
 
   // Reset all filters to default
   const handleResetFilters = () => {
@@ -329,6 +431,7 @@ export default function Home() {
     setMinOutlier(1.5);
     setSortBy("outlierScore");
     setExcludeShorts(false);
+    setSelectedListId("all");
   };
 
   // High-fidelity search filter for cached creators
@@ -339,6 +442,14 @@ export default function Home() {
       (c) => c.name.toLowerCase().includes(q) || c.handle.toLowerCase().includes(q)
     );
   }, [creators, searchQuery]);
+
+  // Filter creators by selected list tag pill
+  const displayedCreators = useMemo(() => {
+    if (selectedListId === "all") return filteredCreators;
+    const activeList = lists.find((l) => l.id === selectedListId);
+    if (!activeList) return [];
+    return filteredCreators.filter((c) => activeList.channels.includes(c.channel_id));
+  }, [filteredCreators, selectedListId, lists]);
 
   return (
     <div className="w-full max-w-[1280px] mx-auto px-4 sm:px-6 min-h-screen flex flex-col">
@@ -368,14 +479,27 @@ export default function Home() {
                 onRefresh={handleRefreshCreators}
                 refreshStatus={refreshStatus}
                 setRefreshStatus={setRefreshStatus}
-              />
+              >
+                {/* List Selection Pill Tags */}
+                {!creatorsError && (
+                  <ListPills
+                    lists={lists}
+                    selectedListId={selectedListId}
+                    onSelectListId={setSelectedListId}
+                    creators={creators}
+                    onManageListClick={() => setIsEditListModalOpen(true)}
+                  />
+                )}
+              </CreatorsHeader>
             )}
+
             <CreatorsList
-              creators={filteredCreators}
+              creators={displayedCreators}
               isLoading={creatorsLoading}
               error={creatorsError}
               onRetry={fetchCreators}
               layout={creatorsLayout}
+              onManageLists={setActiveManageListCreator}
             />
           </>
         ) : activeTab === "mylists" ? (
@@ -398,6 +522,19 @@ export default function Home() {
           </div>
         ) : (
           <>
+            {/* List Selection Pill Tags for Discover tab */}
+            {creators.length > 0 && (
+              <div className="mb-6 mt-4 border-b border-border-subtle/50 pb-4">
+                <ListPills
+                  lists={lists}
+                  selectedListId={selectedListId}
+                  onSelectListId={setSelectedListId}
+                  creators={creators}
+                  onManageListClick={() => setIsEditListModalOpen(true)}
+                />
+              </div>
+            )}
+
             <VideoGrid videos={videos} onResetFilters={handleResetFilters} />
 
             <LoadingFooter hasMore={hasMore} isLoading={isLoading} />
@@ -426,6 +563,27 @@ export default function Home() {
         isOpen={isRefreshModalOpen}
         onClose={() => setIsRefreshModalOpen(false)}
         report={refreshReport}
+      />
+
+      {/* Manage Lists Modal Overlay */}
+      <ManageListsModal
+        isOpen={activeManageListCreator !== null}
+        onClose={() => setActiveManageListCreator(null)}
+        creator={activeManageListCreator}
+        lists={lists}
+        onToggleList={handleToggleListChannel}
+        onCreateList={handleCreateList}
+        onDeleteList={handleDeleteList}
+      />
+
+      {/* Edit List Modal Overlay */}
+      <EditListModal
+        isOpen={isEditListModalOpen}
+        onClose={() => setIsEditListModalOpen(false)}
+        list={lists.find((l) => l.id === selectedListId) || null}
+        allCreators={creators}
+        onUpdateList={handleUpdateList}
+        onDeleteList={handleDeleteList}
       />
     </div>
   );
