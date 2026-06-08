@@ -79,14 +79,14 @@ export default function VideoCard({ video }: VideoCardProps) {
       </a>
 
       {/* Video Info / Details */}
-      <div className="flex pt-3 pb-2 px-0.5 gap-3 relative">
+      <div className="flex pt-2 pb-1 px-0.5 gap-2.5 relative">
         {/* Profile Avatar */}
         <Link href={`/creators/${encodeURIComponent(video.creator)}/outliers`} className="shrink-0 group/avatar">
           <img
             src={video.creatorAvatar}
             alt={video.creator}
             referrerPolicy="no-referrer"
-            className="w-9 h-9 rounded-full bg-surface-raised border border-border-subtle object-cover transition-all duration-150 group-hover/avatar:scale-105 group-hover/avatar:border-brand"
+            className="w-8 h-8 rounded-full bg-surface-raised border border-border-subtle object-cover transition-all duration-150 group-hover/avatar:scale-105 group-hover/avatar:border-brand"
           />
         </Link>
 
@@ -102,7 +102,7 @@ export default function VideoCard({ video }: VideoCardProps) {
             {video.creator}
           </Link>
           
-          <div className="flex flex-col gap-1.5 mt-1">
+          <div className="flex flex-col gap-1 mt-0.5">
             <div className="flex items-center text-[0.8rem] text-secondary whitespace-nowrap sm:text-[0.8rem] text-[0.78rem]">
               <span>{video.views}</span>
               <span className="opacity-50 mx-1">•</span>
