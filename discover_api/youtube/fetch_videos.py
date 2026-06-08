@@ -60,6 +60,7 @@ def video_to_dict(video: Video) -> dict:
         "tags": video.tags,
         "category_id": video.category_id,
         "live_broadcast": video.live_broadcast,
+        "is_short": video.is_short,
     }
 
 
@@ -80,7 +81,82 @@ def dict_to_video(d: dict) -> Video:
         tags=d.get("tags", []),
         category_id=d.get("category_id"),
         live_broadcast=d.get("live_broadcast"),
+        is_short=d.get("is_short"),
     )
+
+
+_YOUTUBE_REACHABLE: Optional[bool] = None
+
+def check_youtube_connectivity() -> bool:
+    global _YOUTUBE_REACHABLE
+    if _YOUTUBE_REACHABLE is not None:
+        return _YOUTUBE_REACHABLE
+    
+    import requests
+    try:
+        # A quick check to see if we can reach YouTube
+        res = requests.head(
+            "https://www.youtube.com", 
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}, 
+            timeout=1.5
+        )
+        _YOUTUBE_REACHABLE = (res.status_code < 400)
+    except Exception:
+        _YOUTUBE_REACHABLE = False
+        logger.warning("YouTube is unreachable. Falling back to offline Shorts classification heuristic (duration <= 60s).")
+    return _YOUTUBE_REACHABLE
+
+
+def ensure_shorts_classification(videos_data: list) -> bool:
+    """
+    On-the-fly classification of YouTube Shorts for a list of serialized videos.
+    Modifies the dictionaries in place and returns True if any changes were made.
+    """
+    from .utils import parse_iso8601_duration
+    needs_check = []
+    modified = False
+    
+    for i, v in enumerate(videos_data):
+        if "is_short" not in v or v["is_short"] is None:
+            duration = v.get("duration")
+            duration_sec = parse_iso8601_duration(duration)
+            if duration_sec is not None and duration_sec > 60:
+                v["is_short"] = False
+                modified = True
+            else:
+                # If YouTube is unreachable, use offline heuristic immediately
+                if not check_youtube_connectivity():
+                    v["is_short"] = True
+                    modified = True
+                else:
+                    needs_check.append((i, v["video_id"]))
+    
+    if needs_check:
+        import requests
+        from concurrent.futures import ThreadPoolExecutor
+        
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        })
+        
+        def check_short_http(video_id: str) -> bool:
+            url = f"https://www.youtube.com/shorts/{video_id}"
+            try:
+                res = session.head(url, allow_redirects=False, timeout=3)
+                return res.status_code == 200
+            except Exception as e:
+                logger.warning(f"Error checking YouTube Short status for {video_id}: {e}")
+                return False
+                
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            results = list(executor.map(lambda x: check_short_http(x[1]), needs_check))
+            
+        for (idx, _), is_short in zip(needs_check, results):
+            videos_data[idx]["is_short"] = is_short
+            
+        return True
+    return modified
 
 
 # ── Core functions ────────────────────────────────────────────────────────────
@@ -264,6 +340,10 @@ def fetch_channel_videos(api_key: str, channel_id: str, fresh: bool = False, ret
     # 6. Save updated video list to JSON cache
     try:
         serialized_videos = [video_to_dict(v) for v in all_videos]
+        ensure_shorts_classification(serialized_videos)
+        for v, sv in zip(all_videos, serialized_videos):
+            v.is_short = sv.get("is_short")
+            
         with open(cache_file, "w", encoding="utf-8") as f:
             json.dump(serialized_videos, f, indent=2, ensure_ascii=False)
         

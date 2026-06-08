@@ -23,6 +23,7 @@ def calculate_outliers(
     days: Optional[float] = None,
     limit: Optional[int] = None,
     api_key: Optional[str] = None,
+    exclude_shorts: bool = False,
 ) -> dict:
     """
     Main business logic for outlier calculation.
@@ -85,6 +86,9 @@ def calculate_outliers(
     now = datetime.now(timezone.utc)
 
     for v in videos:
+        if exclude_shorts and v.is_short:
+            continue
+
         # Calculate ratios
         view_ratio = v.view_count / avg_views if (v.view_count is not None and avg_views > 0) else 0.0
         like_ratio = v.like_count / avg_likes if (v.like_count is not None and avg_likes > 0) else 0.0
@@ -126,7 +130,8 @@ def calculate_outliers(
             "view_diff": int(v.view_count - avg_views) if v.view_count is not None else 0,
             "like_diff": int(v.like_count - avg_likes) if v.like_count is not None else 0,
             "age_in_days": round(age_in_days, 2),
-            "is_boosted": is_boosted
+            "is_boosted": is_boosted,
+            "is_short": v.is_short
         })
 
     # Sort outliers by final score in descending order
@@ -157,6 +162,7 @@ def calculate_all_cached_outliers(
     min_outlier: Optional[float] = None,
     time_range: Optional[str] = None,
     sort_by: str = "outlierScore",
+    exclude_shorts: bool = False,
 ) -> list:
     """
     Scans the cached creators, calculates outlier scores for all of them completely offline,
@@ -202,6 +208,16 @@ def calculate_all_cached_outliers(
         if not videos_data or not isinstance(videos_data, list):
             continue
 
+        # On-the-fly migration: classify shorts and write back to cache if updated
+        try:
+            from .fetch_videos import ensure_shorts_classification
+            if ensure_shorts_classification(videos_data):
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump(videos_data, f, indent=2, ensure_ascii=False)
+                logger.info(f"Successfully migrated and saved shorts classification for {cache_file.name}")
+        except Exception as e:
+            logger.warning(f"Failed to write migrated cache back to {cache_file.name}: {e}")
+
         videos = []
         for v_dict in videos_data:
             try:
@@ -220,6 +236,9 @@ def calculate_all_cached_outliers(
         avg_likes = sum(v.like_count for v in valid_likes_videos) / len(valid_likes_videos) if valid_likes_videos else 0.0
 
         for v in videos:
+            if exclude_shorts and v.is_short:
+                continue
+
             # Calculate ratios
             view_ratio = v.view_count / avg_views if (v.view_count is not None and avg_views > 0) else 0.0
             like_ratio = v.like_count / avg_likes if (v.like_count is not None and avg_likes > 0) else 0.0
@@ -260,6 +279,7 @@ def calculate_all_cached_outliers(
                 "like_diff": int(v.like_count - avg_likes) if v.like_count is not None else 0,
                 "age_in_days": round(age_in_days, 2),
                 "is_boosted": is_boosted,
+                "is_short": v.is_short,
                 "channel_id": channel_id,
                 "channel_name": channel_name,
                 "channel_avatar": channel_avatar,

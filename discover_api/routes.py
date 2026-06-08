@@ -53,7 +53,7 @@ class RecommendRequest(BaseModel):
 # ── Routes Definitions ─────────────────────────────────────────────────────────
 
 @router.get("/fetch-videos")
-async def get_videos(
+def get_videos(
     channel: Optional[str] = Query(
         None, 
         description="YouTube channel ID, handle (starts with @), or name. If empty, falls back to default."
@@ -97,7 +97,7 @@ async def get_videos(
 
 
 @router.get("/fetch-outliers")
-async def get_outliers(
+def get_outliers(
     channel: str = Query(
         ..., 
         description="YouTube channel ID, handle (starts with @), or name."
@@ -110,6 +110,10 @@ async def get_outliers(
         None, 
         ge=1, 
         description="Optional: limit the number of outliers returned."
+    ),
+    exclude_shorts: bool = Query(
+        False,
+        description="Optional: whether to exclude YouTube Shorts from results."
     )
 ):
     """
@@ -122,7 +126,7 @@ async def get_outliers(
         if limit is not None and limit <= 0:
             raise HTTPException(status_code=400, detail="The limit parameter must be a positive integer.")
 
-        outliers_report = calculate_outliers(channel_input=channel, days=days, limit=limit)
+        outliers_report = calculate_outliers(channel_input=channel, days=days, limit=limit, exclude_shorts=exclude_shorts)
         return outliers_report
     except ValueError as e:
         logger.error(f"Validation error in fetch-outliers: {e}", exc_info=True)
@@ -373,14 +377,15 @@ async def refresh_creators():
 
 
 @router.get("/all-outliers")
-async def get_all_outliers(
+def get_all_outliers(
     page: int = Query(1, ge=1, description="Page number for pagination"),
     limit: int = Query(12, ge=1, le=100, description="Items per page"),
     search: Optional[str] = Query(None, description="Search term for video title or channel name"),
     min_outlier: Optional[float] = Query(None, description="Minimum outlier score threshold"),
     days: Optional[float] = Query(None, description="Recency boost days multiplier"),
     time_range: Optional[str] = Query(None, description="Publish time range cutoff"),
-    sort_by: str = Query("outlierScore", description="Sort criteria: outlierScore, views, newest")
+    sort_by: str = Query("outlierScore", description="Sort criteria: outlierScore, views, newest"),
+    exclude_shorts: bool = Query(False, description="Whether to exclude YouTube Shorts from results")
 ):
     """
     Retrieve aggregated outliers from all cached creators completely offline,
@@ -394,7 +399,8 @@ async def get_all_outliers(
             search=search,
             min_outlier=min_outlier,
             time_range=time_range,
-            sort_by=sort_by
+            sort_by=sort_by,
+            exclude_shorts=exclude_shorts
         )
 
         total = len(all_outliers)

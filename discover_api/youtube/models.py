@@ -31,6 +31,7 @@ class Video:
     category_id:     Optional[str]  = None
     live_broadcast:  Optional[str]  = None   # "none" | "live" | "upcoming"
     url:             str            = ""
+    is_short:        Optional[bool] = None
 
     def __post_init__(self):
         self.url = f"https://www.youtube.com/watch?v={self.video_id}"
