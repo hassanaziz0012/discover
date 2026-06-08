@@ -7,6 +7,7 @@ export interface CreatorsHeaderProps {
   onRefresh: () => Promise<void>;
   refreshStatus: { type: "success" | "error"; message: string } | null;
   setRefreshStatus: (status: { type: "success" | "error"; message: string } | null) => void;
+  children?: React.ReactNode;
 }
 
 export default function CreatorsHeader({
@@ -16,11 +17,13 @@ export default function CreatorsHeader({
   onRefresh,
   refreshStatus,
   setRefreshStatus,
+  children,
 }: CreatorsHeaderProps) {
   return (
     <div className="flex flex-col gap-3 mb-4 mt-6">
-      <div className="flex justify-end items-center px-1">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-1">
+        {children && <div className="flex-1 min-w-0">{children}</div>}
+        <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
           {/* Layout Toggles */}
           <div className="flex items-center bg-surface-raised border border-border-subtle p-0.5 rounded-full shadow-xs">
             <button
