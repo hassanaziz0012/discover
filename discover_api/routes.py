@@ -422,4 +422,34 @@ def get_all_outliers(
         raise HTTPException(status_code=500, detail=f"Failed to fetch all outliers: {e}")
 
 
+@router.get("/analyze-video-sentiment")
+def analyze_video_sentiment(
+    video_id: str = Query(..., description="YouTube video ID or URL"),
+    limit: Optional[int] = Query(100, ge=1, le=2000, description="Max comments to fetch and analyze"),
+    model: Optional[str] = Query("gemini-3.5-flash", description="Gemini model to use")
+):
+    """
+    Fetch comments for a YouTube video and perform sentiment analysis using Gemini.
+    """
+    if model not in {"gemini-3.5-flash", "gemma-4"}:
+        raise HTTPException(status_code=400, detail=f"Invalid model selected: {model!r}. Must be 'gemini-3.5-flash' or 'gemma-4'.")
+
+    try:
+        from youtube.sentiment_analyzer import analyze_video_comments_sentiment
+        
+        report = analyze_video_comments_sentiment(
+            video_id_or_url=video_id,
+            limit=limit,
+            model=model
+        )
+        return report
+    except ValueError as e:
+        logger.error(f"Validation/YouTube error in analyze-video-sentiment: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Unexpected error in analyze-video-sentiment: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to analyze video sentiment: {str(e)}")
+
+
+
 

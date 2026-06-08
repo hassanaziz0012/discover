@@ -1,14 +1,34 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { Video } from "../types/video";
+import SentimentAnalysisModal from "./SentimentAnalysisModal";
 
 interface VideoCardProps {
   video: Video;
 }
 
 export default function VideoCard({ video }: VideoCardProps) {
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isSentimentModalOpen, setIsSentimentModalOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    if (isDropdownOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isDropdownOpen]);
+
   // Format dynamic HSL colors for the outlier badge based on multiplier
   const getOutlierBadgeStyles = (score: number) => {
     if (score >= 100) {
@@ -82,7 +102,7 @@ export default function VideoCard({ video }: VideoCardProps) {
             {video.creator}
           </Link>
           
-          <div className="flex items-center justify-between mt-1 gap-2">
+          <div className="flex flex-col gap-1.5 mt-1">
             <div className="flex items-center text-[0.8rem] text-secondary whitespace-nowrap sm:text-[0.8rem] text-[0.78rem]">
               <span>{video.views}</span>
               <span className="opacity-50 mx-1">•</span>
@@ -91,7 +111,7 @@ export default function VideoCard({ video }: VideoCardProps) {
 
             {/* Dynamic Outlier Score Badge */}
             <div
-              className="text-[0.78rem] font-bold py-[3px] px-2 rounded-full border border-transparent inline-flex items-center justify-center transition-all duration-150 whitespace-nowrap"
+              className="text-[0.78rem] font-bold py-[3px] px-2 rounded-full border border-transparent inline-flex items-center justify-center whitespace-nowrap w-fit"
               style={{
                 backgroundColor: badgeStyle.background,
                 color: badgeStyle.color,
@@ -104,19 +124,47 @@ export default function VideoCard({ video }: VideoCardProps) {
           </div>
         </div>
 
-        {/* YouTube Watch Trigger Icon */}
-        <a
-          href={video.youtubeUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="absolute bottom-2 right-0.5 text-disabled flex items-center justify-center w-7 h-7 rounded-full bg-transparent transition-all duration-150 opacity-80 sm:opacity-0 sm:group-hover/card:opacity-100 hover:bg-surface-raised hover:text-[#FF0000] dark:hover:text-[#FF4D4D]"
-          title="Watch on YouTube"
-        >
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-            <path d="M23.498 6.163a3.003 3.003 0 0 0-2.11-2.107C19.528 3.545 12 3.545 12 3.545s-7.528 0-9.388.511a3.002 3.002 0 0 0-2.11 2.107C0 8.021 0 12 0 12s0 3.979.502 5.837a3.002 3.002 0 0 0 2.11 2.107c1.86.511 9.388.511 9.388.511s7.528 0 9.388-.511a3.002 3.002 0 0 0 2.11-2.107c.502-1.858.502-5.837.502-5.837s0-3.979-.502-5.837zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
-          </svg>
-        </a>
+        {/* Options Dropdown Menu (3 dots) */}
+        <div className="absolute bottom-2 right-0.5 flex items-center" ref={dropdownRef}>
+          <button
+            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+            className="flex items-center justify-center w-7 h-7 rounded-full bg-transparent transition-all duration-150 opacity-80 sm:opacity-0 sm:group-hover/card:opacity-100 hover:bg-surface-raised hover:text-brand"
+            title="More Options"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <circle cx="12" cy="6" r="1.5"></circle>
+              <circle cx="12" cy="12" r="1.5"></circle>
+              <circle cx="12" cy="18" r="1.5"></circle>
+            </svg>
+          </button>
+
+          {isDropdownOpen && (
+            <div className="absolute bottom-8 right-0 bg-surface border border-border rounded-md shadow-md py-1 w-48 z-[60] animate-fade-in">
+              <button
+                onClick={() => {
+                  setIsDropdownOpen(false);
+                  setIsSentimentModalOpen(true);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-primary hover:bg-surface-raised hover:text-brand text-left transition-colors duration-150"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  <path d="M8 10h.01M12 10h.01M16 10h.01" />
+                </svg>
+                Analyze user sentiment
+              </button>
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* Sentiment Analysis Report Modal */}
+      <SentimentAnalysisModal
+        isOpen={isSentimentModalOpen}
+        onClose={() => setIsSentimentModalOpen(false)}
+        videoId={video.id}
+        videoTitle={video.title}
+      />
     </article>
   );
 }
