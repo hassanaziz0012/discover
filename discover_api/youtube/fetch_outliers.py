@@ -163,6 +163,7 @@ def calculate_all_cached_outliers(
     time_range: Optional[str] = None,
     sort_by: str = "outlierScore",
     exclude_shorts: bool = False,
+    list_id: Optional[str] = None,
 ) -> list:
     """
     Scans the cached creators, calculates outlier scores for all of them completely offline,
@@ -175,6 +176,24 @@ def calculate_all_cached_outliers(
     from .fetch_videos import dict_to_video
 
     creators = get_cached_creators()
+
+    if list_id:
+        lists_file = cache_dir / "lists.json"
+        if lists_file.exists():
+            try:
+                with open(lists_file, "r", encoding="utf-8") as f:
+                    lists_data = json.load(f)
+                for l in lists_data:
+                    if l.get("id") == list_id or l.get("name") == list_id:
+                        target_channels = set(l.get("channels", []))
+                        creators = [c for c in creators if c.get("channel_id") in target_channels]
+                        break
+                else:
+                    # List ID or name specified but not found
+                    creators = []
+            except Exception as e:
+                logger.warning(f"Failed to read lists file: {e}")
+
     all_outliers = []
     now = datetime.now(timezone.utc)
 
