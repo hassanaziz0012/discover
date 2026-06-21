@@ -16,7 +16,7 @@ import LoadingFooter from "./components/LoadingFooter";
 import ListPills from "./components/ListPills";
 import { formatViews, formatDuration, timeAgo } from "./utils/format";
 
-const API_BASE_URL = "http://localhost:8000";
+import { API_BASE_URL } from "@/app/utils/constants";
 
 export default function Home() {
   // Navigation & Filtering States

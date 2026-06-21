@@ -7,7 +7,7 @@ import VideoGrid from "../../../components/VideoGrid";
 import { Video } from "../../../types/video";
 import { formatViews, formatDuration, timeAgo } from "../../../utils/format";
 
-const API_BASE_URL = "http://localhost:8000";
+import { API_BASE_URL } from "@/app/utils/constants";
 
 interface ApiOutlier {
   video_id: string;

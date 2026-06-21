@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 // Easily tweakable constants
 const DEBOUNCE_DELAY_MS = 300;
-const API_BASE_URL = "http://localhost:8000";
+import { API_BASE_URL } from "@/app/utils/constants";
 
 interface SearchBarProps {
   searchQuery: string;
