@@ -1,12 +1,16 @@
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
 
 export interface CreatorsHeaderProps {
   creatorsLayout: "list" | "grid";
   setCreatorsLayout: (layout: "list" | "grid") => void;
   isRefreshing: boolean;
   onRefresh: () => Promise<void>;
+  isSyncing?: boolean;
+  onSync?: () => Promise<void>;
   refreshStatus: { type: "success" | "error"; message: string } | null;
   setRefreshStatus: (status: { type: "success" | "error"; message: string } | null) => void;
+  channelSearchQuery?: string;
+  setChannelSearchQuery?: (query: string) => void;
   children?: React.ReactNode;
 }
 
@@ -15,15 +19,118 @@ export default function CreatorsHeader({
   setCreatorsLayout,
   isRefreshing,
   onRefresh,
+  isSyncing = false,
+  onSync,
   refreshStatus,
   setRefreshStatus,
+  channelSearchQuery = "",
+  setChannelSearchQuery = () => {},
   children,
 }: CreatorsHeaderProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleToggleExpand = () => {
+    if (!isExpanded) {
+      setIsExpanded(true);
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
+    } else {
+      if (!channelSearchQuery) {
+        setIsExpanded(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        if (!channelSearchQuery) {
+          setIsExpanded(false);
+        }
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !channelSearchQuery) {
+        setIsExpanded(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [channelSearchQuery]);
   return (
     <div className="flex flex-col gap-3 mb-4 mt-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-1">
         {children && <div className="flex-1 min-w-0">{children}</div>}
         <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+          {/* Mini Search Bar */}
+          <div
+            ref={containerRef}
+            className={`flex items-center bg-surface-raised border border-border-subtle rounded-full shadow-xs transition-all duration-300 ease-in-out h-[38px] overflow-hidden ${
+              isExpanded ? "w-40 sm:w-56 px-3 gap-2" : "w-[38px] justify-center cursor-pointer hover:bg-surface-overlay hover:border-border"
+            }`}
+            onClick={() => {
+              if (!isExpanded) handleToggleExpand();
+            }}
+          >
+            <button
+              type="button"
+              onClick={(e) => {
+                if (isExpanded) {
+                  e.stopPropagation();
+                  handleToggleExpand();
+                }
+              }}
+              className="flex items-center justify-center text-secondary hover:text-primary shrink-0 transition-transform duration-200"
+              title={isExpanded ? "Collapse search" : "Search channels"}
+              aria-label="Search channels"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+            </button>
+
+            <input
+              ref={inputRef}
+              type="text"
+              value={channelSearchQuery}
+              onChange={(e) => setChannelSearchQuery(e.target.value)}
+              placeholder="Search channel..."
+              className={`bg-transparent border-none text-[0.82rem] text-primary placeholder-disabled outline-none focus:outline-none transition-all duration-300 ease-in-out ${
+                isExpanded ? "w-full opacity-100" : "w-0 opacity-0 pointer-events-none"
+              }`}
+              onClick={(e) => e.stopPropagation()}
+            />
+
+            {isExpanded && channelSearchQuery && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setChannelSearchQuery("");
+                  inputRef.current?.focus();
+                }}
+                className="text-secondary hover:text-primary p-0.5 rounded-full hover:bg-surface-overlay transition-colors shrink-0"
+                title="Clear search"
+                aria-label="Clear search"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            )}
+          </div>
+
           {/* Layout Toggles */}
           <div className="flex items-center bg-surface-raised border border-border-subtle p-0.5 rounded-full shadow-xs">
             <button
@@ -66,9 +173,9 @@ export default function CreatorsHeader({
 
           <button
             onClick={onRefresh}
-            disabled={isRefreshing}
+            disabled={isRefreshing || isSyncing}
             className={`flex items-center gap-2 px-4 py-2 text-[0.82rem] font-bold rounded-full border border-border-subtle bg-surface-raised text-primary hover:bg-surface-overlay hover:border-brand active:scale-[0.98] transition-all duration-150 ease-in-out shadow-xs select-none ${
-              isRefreshing ? "opacity-50 cursor-not-allowed" : ""
+              isRefreshing || isSyncing ? "opacity-50 cursor-not-allowed" : ""
             }`}
             title="Refresh all creators"
           >
@@ -83,6 +190,38 @@ export default function CreatorsHeader({
             </svg>
             {isRefreshing ? "Refreshing Channels..." : "Refresh Channels"}
           </button>
+
+          {/* Sync Subscriptions Button */}
+          {onSync && (
+            <button
+              onClick={onSync}
+              disabled={isRefreshing || isSyncing}
+              className={`flex items-center gap-2 px-4 py-2 text-[0.82rem] font-bold rounded-full border border-border-subtle bg-surface-raised text-primary hover:bg-surface-overlay hover:border-brand active:scale-[0.98] transition-all duration-150 ease-in-out shadow-xs select-none ${
+                isRefreshing || isSyncing ? "opacity-50 cursor-not-allowed" : ""
+              }`}
+              title="Sync channels from YouTube Subscriptions"
+            >
+              <svg
+                className={`w-4 h-4 ${isSyncing ? "animate-spin text-brand" : "text-secondary hover:text-brand"}`}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+              >
+                {isSyncing ? (
+                  <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+                ) : (
+                  <>
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                    <circle cx="9" cy="7" r="4" />
+                    <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                  </>
+                )}
+              </svg>
+              {isSyncing ? "Syncing Subscriptions..." : "Sync Subscriptions"}
+            </button>
+          )}
         </div>
       </div>
 

@@ -20,6 +20,7 @@ interface CreatorsListProps {
   onRetry?: () => void;
   layout?: "list" | "grid";
   onManageLists?: (creator: Creator) => void;
+  onDeleteChannel?: (channelId: string) => void;
 }
 
 // Helper to format subscriber count (e.g., 17200000 -> 17.2M, 9700000 -> 9.7M)
@@ -50,12 +51,15 @@ export default function CreatorsList({
   onRetry,
   layout = "list",
   onManageLists,
+  onDeleteChannel,
 }: CreatorsListProps) {
   const [activeDropdownChannelId, setActiveDropdownChannelId] = useState<string | null>(null);
+  const [confirmingChannelId, setConfirmingChannelId] = useState<string | null>(null);
 
   useEffect(() => {
     const handleClickOutside = () => {
       setActiveDropdownChannelId(null);
+      setConfirmingChannelId(null);
     };
     window.addEventListener("click", handleClickOutside);
     return () => {
@@ -67,7 +71,9 @@ export default function CreatorsList({
     e.preventDefault();
     e.stopPropagation();
     setActiveDropdownChannelId(activeDropdownChannelId === channelId ? null : channelId);
+    setConfirmingChannelId(null);
   };
+
 
   if (error) {
     return (
@@ -245,16 +251,27 @@ export default function CreatorsList({
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    setActiveDropdownChannelId(null);
-                    alert("Delete channel functionality is dummy and will be implemented later.");
+                    if (confirmingChannelId !== creator.channel_id) {
+                      setConfirmingChannelId(creator.channel_id);
+                    } else {
+                      setActiveDropdownChannelId(null);
+                      setConfirmingChannelId(null);
+                      if (onDeleteChannel) {
+                        onDeleteChannel(creator.channel_id);
+                      }
+                    }
                   }}
-                  className="w-full text-left px-4 py-2 text-sm text-error hover:bg-error-subtle flex items-center gap-2.5 transition-colors duration-150 border-t border-border-subtle/30"
+                  className={`w-full text-left px-4 py-2 text-sm flex items-center gap-2.5 transition-colors duration-150 border-t border-border-subtle/30 ${
+                    confirmingChannelId === creator.channel_id
+                      ? "text-brand bg-brand-subtle font-semibold hover:bg-brand-subtle/80"
+                      : "text-error hover:bg-error-subtle"
+                  }`}
                 >
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <polyline points="3 6 5 6 21 6"></polyline>
                     <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                   </svg>
-                  Delete channel
+                  {confirmingChannelId === creator.channel_id ? "Confirm delete" : "Delete channel"}
                 </button>
               </div>
             )}

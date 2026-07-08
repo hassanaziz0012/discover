@@ -19,6 +19,8 @@ export interface RefreshReport {
   message: string;
   refreshed: RefreshedChannel[];
   errors: RefreshError[];
+  title?: string;
+  subtitle?: string;
 }
 
 interface RefreshReportModalProps {
@@ -64,8 +66,20 @@ export default function RefreshReportModal({
 
   const { newlyRefreshed, fullyCached } = useMemo(() => {
     const refreshed = report?.refreshed || [];
-    const newlyRefreshed = refreshed.filter((chan) => chan.new_videos_count > 0);
-    const fullyCached = refreshed.filter((chan) => chan.new_videos_count === 0);
+    
+    const newlyRefreshed = refreshed
+      .filter((chan) => chan.new_videos_count > 0)
+      .sort((a, b) => {
+        if (b.new_videos_count !== a.new_videos_count) {
+          return b.new_videos_count - a.new_videos_count;
+        }
+        return a.channel_name.localeCompare(b.channel_name);
+      });
+
+    const fullyCached = refreshed
+      .filter((chan) => chan.new_videos_count === 0)
+      .sort((a, b) => a.channel_name.localeCompare(b.channel_name));
+
     return { newlyRefreshed, fullyCached };
   }, [report]);
 
@@ -92,8 +106,8 @@ export default function RefreshReportModal({
               </svg>
             </div>
             <div>
-              <h2 className="text-xl font-bold text-primary tracking-[-0.01em]">Refresh Complete</h2>
-              <p className="text-xs text-secondary mt-0.5">Summary of channel updates</p>
+              <h2 className="text-xl font-bold text-primary tracking-[-0.01em]">{report.title || "Refresh Complete"}</h2>
+              <p className="text-xs text-secondary mt-0.5">{report.subtitle || "Summary of channel updates"}</p>
             </div>
           </div>
           <button
