@@ -5,13 +5,10 @@ import TabNavigation from "./components/TabNavigation";
 import SearchBar from "./components/SearchBar";
 import VideoGrid from "./components/VideoGrid";
 import FilterModal from "./components/FilterModal";
-import CreatorsList, { Creator } from "./components/CreatorsList";
+import { Creator } from "./components/CreatorsList";
 import { Video } from "./types/video";
 import { UserList } from "./types/list";
-import ManageListsModal from "./components/ManageListsModal";
 import EditListModal from "./components/EditListModal";
-import RefreshReportModal, { RefreshReport } from "./components/RefreshReportModal";
-import CreatorsHeader from "./components/CreatorsHeader";
 import LoadingFooter from "./components/LoadingFooter";
 import ListPills from "./components/ListPills";
 import { formatViews, formatDuration, timeAgo } from "./utils/format";
@@ -20,20 +17,18 @@ import { API_BASE_URL } from "@/app/utils/constants";
 
 export default function Home() {
   // Navigation & Filtering States
-  const [activeTab, setActiveTab] = useState("discover");
   const [searchQuery, setSearchQuery] = useState("");
 
   // Lists States
   const [lists, setLists] = useState<UserList[]>([]);
   const [selectedListId, setSelectedListId] = useState<string>("all");
-  const [activeManageListCreator, setActiveManageListCreator] = useState<Creator | null>(null);
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
   const [isEditListModalOpen, setIsEditListModalOpen] = useState(false);
 
   // Configuration Filter States (Syncs to FilterModal)
   const [platform, setPlatformState] = useState("YouTube");
   const [timeRange, setTimeRangeState] = useState("all");
-  const [minOutlier, setMinOutlierState] = useState(1.5); // updated default to be 1.5x
+  const [minOutlier, setMinOutlierState] = useState(1.5);
   const [sortBy, setSortByState] = useState("outlierScore");
   const [excludeShorts, setExcludeShortsState] = useState(false);
   const [isFiltersLoaded, setIsFiltersLoaded] = useState(false);
@@ -74,15 +69,6 @@ export default function Home() {
     }
   };
 
-  const [creatorsLayout, setCreatorsLayoutState] = useState<"list" | "grid">("list");
-
-  const setCreatorsLayout = (val: "list" | "grid") => {
-    setCreatorsLayoutState(val);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("discover_creatorsLayout", val);
-    }
-  };
-
   // Load saved filters on client mount
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -91,7 +77,6 @@ export default function Home() {
       const savedMinOutlier = localStorage.getItem("discover_minOutlier");
       const savedSortBy = localStorage.getItem("discover_sortBy");
       const savedExcludeShorts = localStorage.getItem("discover_excludeShorts");
-      const savedCreatorsLayout = localStorage.getItem("discover_creatorsLayout");
 
       if (savedPlatform) setPlatformState(savedPlatform);
       if (savedTimeRange) setTimeRangeState(savedTimeRange);
@@ -101,9 +86,6 @@ export default function Home() {
       }
       if (savedSortBy) setSortByState(savedSortBy);
       if (savedExcludeShorts) setExcludeShortsState(savedExcludeShorts === "true");
-      if (savedCreatorsLayout === "list" || savedCreatorsLayout === "grid") {
-        setCreatorsLayoutState(savedCreatorsLayout);
-      }
     }
     setIsFiltersLoaded(true);
     fetchLists();
@@ -117,10 +99,8 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Cached Creators API States
+  // Creators cache state (used strictly for displaying ListPills names)
   const [creators, setCreators] = useState<Creator[]>([]);
-  const [creatorsLoading, setCreatorsLoading] = useState(false);
-  const [creatorsError, setCreatorsError] = useState<string | null>(null);
 
   // Search query debouncing state
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(searchQuery);
@@ -138,79 +118,18 @@ export default function Home() {
     };
   }, [searchQuery]);
 
-  // Fetch cached creators from backend API
+  // Fetch cached creators from backend API for ListPills reference
   async function fetchCreators() {
-    setCreatorsLoading(true);
-    setCreatorsError(null);
     try {
       const response = await fetch(`${API_BASE_URL}/api/youtube/cached-creators`);
       if (response.ok) {
         const data = await response.json();
         setCreators(data);
-      } else {
-        const errJson = await response.json().catch(() => ({}));
-        setCreatorsError(errJson.detail || `Failed to fetch creators (Server status: ${response.status})`);
       }
     } catch (err) {
       console.error("Fetch creators error:", err);
-      setCreatorsError("Unable to connect to the backend server. Please verify that the uvicorn server is running on port 8000.");
-    } finally {
-      setCreatorsLoading(false);
     }
   }
-
-  // Refresh Creators States
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [refreshStatus, setRefreshStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
-  const [isRefreshModalOpen, setIsRefreshModalOpen] = useState(false);
-  const [refreshReport, setRefreshReport] = useState<RefreshReport | null>(null);
-
-  const handleRefreshCreators = async () => {
-    if (isRefreshing) return;
-    setIsRefreshing(true);
-    setRefreshStatus(null);
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/youtube/refresh-creators`, {
-        method: "POST",
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.creators) {
-          setCreators(data.creators);
-        }
-        setRefreshReport({
-          message: data.message || "Successfully refreshed all channels.",
-          refreshed: data.refreshed || [],
-          errors: data.errors || [],
-        });
-        setIsRefreshModalOpen(true);
-      } else {
-        const errJson = await response.json().catch(() => ({}));
-        setRefreshStatus({
-          type: "error",
-          message: errJson.detail || `Failed to refresh channels (Server status: ${response.status})`,
-        });
-      }
-    } catch (err) {
-      console.error("Refresh creators error:", err);
-      setRefreshStatus({
-        type: "error",
-        message: "Unable to connect to the backend server. Please verify that the uvicorn server is running on port 8000.",
-      });
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
-  // Auto-hide success message after 5 seconds
-  useEffect(() => {
-    if (refreshStatus && refreshStatus.type === "success") {
-      const timer = setTimeout(() => {
-        setRefreshStatus(null);
-      }, 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [refreshStatus]);
 
   // Fetch Outliers from Backend
   async function fetchOutliers(pageToFetch: number, isReset: boolean) {
@@ -313,45 +232,6 @@ export default function Home() {
     }
   }
 
-  // Create new list in backend
-  const handleCreateList = async (name: string) => {
-    const response = await fetch(`${API_BASE_URL}/api/youtube/lists`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    if (response.ok) {
-      const newList = await response.json();
-      setLists((prev) => [...prev, newList]);
-    } else {
-      const errJson = await response.json().catch(() => ({}));
-      throw new Error(errJson.detail || "Failed to create list.");
-    }
-  };
-
-  // Toggle channel in list (Add/Remove)
-  const handleToggleListChannel = async (listId: string, channelId: string, isChecked: boolean) => {
-    let response;
-    if (isChecked) {
-      response = await fetch(`${API_BASE_URL}/api/youtube/lists/${listId}/channels`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel_id: channelId }),
-      });
-    } else {
-      response = await fetch(`${API_BASE_URL}/api/youtube/lists/${listId}/channels/${channelId}`, {
-        method: "DELETE",
-      });
-    }
-
-    if (response.ok) {
-      fetchLists();
-    } else {
-      const errJson = await response.json().catch(() => ({}));
-      throw new Error(errJson.detail || "Failed to update list membership.");
-    }
-  };
-
   // Delete list
   const handleDeleteList = async (listId: string) => {
     const response = await fetch(`${API_BASE_URL}/api/youtube/lists/${listId}`, {
@@ -386,21 +266,13 @@ export default function Home() {
 
   // Trigger reset & load page 1 when active tab, search, or configuration changes
   useEffect(() => {
-    if (!isFiltersLoaded) return; // Wait until filters are loaded from localStorage
-
-    if (activeTab === "discover") {
-      fetchOutliers(1, true);
-    } else if (activeTab === "creators") {
-      if (creators.length === 0) {
-        fetchCreators();
-      }
-      fetchLists();
-    }
-  }, [activeTab, debouncedSearchQuery, minOutlier, timeRange, sortBy, excludeShorts, selectedListId, isFiltersLoaded]);
+    if (!isFiltersLoaded) return;
+    fetchOutliers(1, true);
+  }, [debouncedSearchQuery, minOutlier, timeRange, sortBy, excludeShorts, selectedListId, isFiltersLoaded]);
 
   // Infinite Scroll Trigger via Intersection Observer
   useEffect(() => {
-    if (!isFiltersLoaded || !hasMore || isLoading || activeTab !== "discover") return;
+    if (!isFiltersLoaded || !hasMore || isLoading) return;
 
     const sentinel = document.getElementById("scroll-sentinel");
     if (!sentinel) return;
@@ -421,7 +293,7 @@ export default function Home() {
     return () => {
       observer.disconnect();
     };
-  }, [hasMore, isLoading, page, activeTab, debouncedSearchQuery, minOutlier, timeRange, sortBy, excludeShorts, selectedListId, isFiltersLoaded]);
+  }, [hasMore, isLoading, page, debouncedSearchQuery, minOutlier, timeRange, sortBy, excludeShorts, selectedListId, isFiltersLoaded]);
 
   // Reset all filters to default
   const handleResetFilters = () => {
@@ -433,23 +305,6 @@ export default function Home() {
     setExcludeShorts(false);
     setSelectedListId("all");
   };
-
-  // High-fidelity search filter for cached creators
-  const filteredCreators = useMemo(() => {
-    if (!searchQuery.trim()) return creators;
-    const q = searchQuery.toLowerCase().trim();
-    return creators.filter(
-      (c) => c.name.toLowerCase().includes(q) || c.handle.toLowerCase().includes(q)
-    );
-  }, [creators, searchQuery]);
-
-  // Filter creators by selected list tag pill
-  const displayedCreators = useMemo(() => {
-    if (selectedListId === "all") return filteredCreators;
-    const activeList = lists.find((l) => l.id === selectedListId);
-    if (!activeList) return [];
-    return filteredCreators.filter((c) => activeList.channels.includes(c.channel_id));
-  }, [filteredCreators, selectedListId, lists]);
 
   return (
     <div className="w-full max-w-[1280px] mx-auto px-4 sm:px-6 min-h-screen flex flex-col">
@@ -464,52 +319,12 @@ export default function Home() {
         activeExcludeShorts={excludeShorts}
       />
 
-      {/* Tab Horizontal Navigation (Discover, Creators, My Lists) */}
-      <TabNavigation activeTab={activeTab} setActiveTab={setActiveTab} />
+      {/* Tab Horizontal Navigation (Discover, Channels, Thumbnail Preview) */}
+      <TabNavigation activeTab="discover" />
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col">
-        {activeTab === "creators" ? (
-          <>
-            {creators.length > 0 && !creatorsLoading && (
-              <CreatorsHeader
-                creatorsLayout={creatorsLayout}
-                setCreatorsLayout={setCreatorsLayout}
-                isRefreshing={isRefreshing}
-                onRefresh={handleRefreshCreators}
-                refreshStatus={refreshStatus}
-                setRefreshStatus={setRefreshStatus}
-              >
-                {/* List Selection Pill Tags */}
-                {!creatorsError && (
-                  <ListPills
-                    lists={lists}
-                    selectedListId={selectedListId}
-                    onSelectListId={setSelectedListId}
-                    creators={creators}
-                    onManageListClick={() => setIsEditListModalOpen(true)}
-                  />
-                )}
-              </CreatorsHeader>
-            )}
-
-            <CreatorsList
-              creators={displayedCreators}
-              isLoading={creatorsLoading}
-              error={creatorsError}
-              onRetry={fetchCreators}
-              layout={creatorsLayout}
-              onManageLists={setActiveManageListCreator}
-            />
-          </>
-        ) : activeTab === "mylists" ? (
-          <div className="flex flex-col items-center justify-center text-center py-16 px-4 bg-surface border border-border-subtle rounded-lg my-6 shadow-sm">
-            <h3 className="text-xl font-bold text-primary mb-2">My Lists</h3>
-            <p className="text-secondary max-w-[440px] leading-relaxed">
-              Bookmarked and saved lists functionality is currently offline. All local mock data has been deprecated.
-            </p>
-          </div>
-        ) : error ? (
+        {error ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center py-16 px-4 bg-surface border border-error/15 rounded-lg my-6 shadow-sm animate-fade-in">
             <h3 className="text-xl font-bold text-error mb-2">Error Connecting to Backend</h3>
             <p className="text-secondary max-w-[440px] leading-relaxed mb-6">{error}</p>
@@ -558,24 +373,6 @@ export default function Home() {
         setExcludeShorts={setExcludeShorts}
       />
 
-      {/* Refresh Report Modal */}
-      <RefreshReportModal
-        isOpen={isRefreshModalOpen}
-        onClose={() => setIsRefreshModalOpen(false)}
-        report={refreshReport}
-      />
-
-      {/* Manage Lists Modal Overlay */}
-      <ManageListsModal
-        isOpen={activeManageListCreator !== null}
-        onClose={() => setActiveManageListCreator(null)}
-        creator={activeManageListCreator}
-        lists={lists}
-        onToggleList={handleToggleListChannel}
-        onCreateList={handleCreateList}
-        onDeleteList={handleDeleteList}
-      />
-
       {/* Edit List Modal Overlay */}
       <EditListModal
         isOpen={isEditListModalOpen}
@@ -588,4 +385,3 @@ export default function Home() {
     </div>
   );
 }
-
