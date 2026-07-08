@@ -2,7 +2,12 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import BaseModal from "./BaseModal";
-import ModelSelector from "./ModelSelector";
+import SentimentConfigForm from "./sentiment/SentimentConfigForm";
+import PreviousReportsList from "./sentiment/PreviousReportsList";
+import SentimentSummary from "./sentiment/SentimentSummary";
+import SentimentThemes from "./sentiment/SentimentThemes";
+import CommentAnalysisList from "./sentiment/CommentAnalysisList";
+import { API_BASE_URL } from "@/app/utils/constants";
 
 export interface CommentAnalysis {
   comment_id: string;
@@ -35,8 +40,6 @@ interface SentimentAnalysisModalProps {
   videoTitle: string;
 }
 
-import { API_BASE_URL } from "@/app/utils/constants";
-
 export default function SentimentAnalysisModal({
   isOpen,
   onClose,
@@ -53,22 +56,38 @@ export default function SentimentAnalysisModal({
   const [customLimit, setCustomLimit] = useState<string>("");
   const [hasStarted, setHasStarted] = useState<boolean>(false);
   
-  // Local rendering pagination states
-  const [isCommentsExpanded, setIsCommentsExpanded] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(100);
+  // Previous analyses state
+  const [oldAnalyses, setOldAnalyses] = useState<any[]>([]);
 
-  // Scroll and Sentinel refs
+  // Scroll container ref
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const sentinelRef = useRef<HTMLDivElement>(null);
 
+  const fetchOldAnalyses = async () => {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/youtube/video-sentiment-reports?video_id=${encodeURIComponent(
+          videoId
+        )}`
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setOldAnalyses(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch old sentiment analyses:", err);
+    }
+  };
 
+  useEffect(() => {
+    if (isOpen && videoId) {
+      fetchOldAnalyses();
+    }
+  }, [isOpen, videoId]);
 
   const handleStartAnalysis = async () => {
     setIsLoading(true);
     setError(null);
     setReport(null);
-    setIsCommentsExpanded(false);
-    setVisibleCount(100);
     setHasStarted(true);
 
     try {
@@ -87,6 +106,7 @@ export default function SentimentAnalysisModal({
       if (response.ok) {
         const data = await response.json();
         setReport(data);
+        fetchOldAnalyses();
       } else {
         const errJson = await response.json().catch(() => ({}));
         setError(errJson.detail || `Failed to analyze comments (Server status: ${response.status})`);
@@ -99,62 +119,10 @@ export default function SentimentAnalysisModal({
     }
   };
 
-  // Infinite Scroll Trigger inside the modal
-  useEffect(() => {
-    if (!isCommentsExpanded || !report || visibleCount >= report.analyses.length) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) {
-          setVisibleCount((prev) => Math.min(prev + 100, report.analyses.length));
-        }
-      },
-      {
-        root: scrollContainerRef.current,
-        rootMargin: "100px",
-      }
-    );
-
-    const currentSentinel = sentinelRef.current;
-    if (currentSentinel) {
-      observer.observe(currentSentinel);
-    }
-
-    return () => {
-      if (currentSentinel) {
-        observer.unobserve(currentSentinel);
-      }
-    };
-  }, [isCommentsExpanded, visibleCount, report]);
-
-  const getSentimentBadge = (sentiment: string) => {
-    switch (sentiment) {
-      case "Positive":
-        return "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20";
-      case "Negative":
-        return "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20";
-      case "Mixed":
-        return "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20";
-      default: // Neutral
-        return "bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20";
-    }
+  const handleSelectReport = (selectedReport: SentimentReport) => {
+    setReport(selectedReport);
+    setHasStarted(true);
   };
-
-  const getSentimentIcon = (sentiment: string) => {
-    switch (sentiment) {
-      case "Positive":
-        return "😊";
-      case "Negative":
-        return "😢";
-      case "Mixed":
-        return "😐";
-      default:
-        return "😶";
-    }
-  };
-
-  // Safe division helper for stats percentages
-  const maxReasonCount = report?.most_common_reasons?.[0]?.count || 1;
 
   const renderFooter = () => {
     if (!hasStarted && !isLoading && !report && !error) {
@@ -246,61 +214,18 @@ export default function SentimentAnalysisModal({
     >
       {!hasStarted && !isLoading && !report && !error && (
         <div className="flex flex-col gap-6 py-2 animate-fade-in">
-          {/* Model Choice */}
-          <ModelSelector value={model} onChange={setModel} />
-
-          {/* Limit Choice */}
-          <div className="flex flex-col gap-2.5">
-            <label className="text-[0.85rem] font-bold text-primary uppercase tracking-[0.05em] px-1">
-              Max Comments to Fetch & Analyze
-            </label>
-            <div className="flex flex-wrap items-center gap-2">
-              {[50, 100, 250, 500, 1000].map((preset) => (
-                <button
-                  key={preset}
-                  type="button"
-                  onClick={() => {
-                    setLimit(preset);
-                    setCustomLimit("");
-                  }}
-                  className={`py-2 px-3 border rounded-md text-xs font-semibold transition-all duration-150 cursor-pointer ${
-                    limit === preset && !customLimit
-                      ? "bg-brand text-on-brand border-brand hover:bg-brand-hover shadow-sm"
-                      : "bg-surface-raised border-border-subtle text-secondary hover:bg-surface-overlay hover:text-primary"
-                  }`}
-                >
-                  {preset}
-                </button>
-              ))}
-              
-              <div className="relative flex-1 min-w-[120px]">
-                <input
-                  type="number"
-                  min="1"
-                  max="2000"
-                  value={customLimit}
-                  placeholder="Custom (1-2000)"
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setCustomLimit(val);
-                    if (val) {
-                      setLimit(0);
-                    } else {
-                      setLimit(100);
-                    }
-                  }}
-                  className={`w-full bg-surface-raised border rounded-md py-1.5 px-3 text-xs text-primary transition-all duration-150 outline-none focus:bg-surface-raised ${
-                    customLimit
-                      ? "border-brand ring-1 ring-brand"
-                      : "border-border-subtle focus:border-brand/50"
-                  }`}
-                />
-              </div>
-            </div>
-            <p className="text-[0.72rem] text-secondary leading-relaxed">
-              Analyzing more comments provides deeper insights but takes longer to compute due to batch LLM calls.
-            </p>
-          </div>
+          <SentimentConfigForm
+            model={model}
+            setModel={setModel}
+            limit={limit}
+            setLimit={setLimit}
+            customLimit={customLimit}
+            setCustomLimit={setCustomLimit}
+          />
+          <PreviousReportsList
+            oldAnalyses={oldAnalyses}
+            onSelectReport={handleSelectReport}
+          />
         </div>
       )}
 
@@ -326,142 +251,14 @@ export default function SentimentAnalysisModal({
       )}
 
       {report && (
-        <>
-          {/* Overall Summary Section */}
-          {report.summaries && report.summaries.length > 0 && (
-            <div className="flex flex-col gap-3">
-              <h3 className="text-xs font-bold text-primary uppercase tracking-[0.05em] px-1">
-                AI Sentiment Summary
-              </h3>
-              <div className="flex flex-col gap-3">
-                {report.summaries.map((sum, index) => (
-                  <div
-                    key={index}
-                    className="p-4 bg-brand/5 border-l-4 border-brand rounded-r-xl text-[0.88rem] leading-relaxed text-primary"
-                  >
-                    {sum}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Key Themes / Most Common Reasons */}
-          {report.most_common_reasons && report.most_common_reasons.length > 0 && (
-            <div className="flex flex-col gap-3">
-              <h3 className="text-xs font-bold text-primary uppercase tracking-[0.05em] px-1">
-                Top Recurring Themes
-              </h3>
-              <div className="flex flex-col gap-3 bg-surface-raised border border-border-subtle rounded-xl p-4">
-                {report.most_common_reasons.slice(0, 5).map((item, idx) => {
-                  const percentage = (item.count / maxReasonCount) * 100;
-                  return (
-                    <div key={idx} className="flex flex-col gap-1.5">
-                      <div className="flex justify-between text-xs font-semibold text-primary">
-                        <span className="line-clamp-1">{item.reason}</span>
-                        <span className="text-secondary shrink-0 font-medium">
-                          {item.count} {item.count === 1 ? "comment" : "comments"}
-                        </span>
-                      </div>
-                      <div className="w-full h-2 bg-surface rounded-full overflow-hidden border border-border-subtle">
-                        <div
-                          className="h-full bg-brand rounded-full transition-all duration-300"
-                          style={{ width: `${percentage}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Comments Section Drawer */}
-          <div className="flex flex-col gap-3">
-            <button
-              onClick={() => setIsCommentsExpanded(!isCommentsExpanded)}
-              className="w-full flex items-center justify-between p-3 bg-surface-raised border border-border-subtle rounded-xl hover:bg-surface-overlay hover:border-brand/30 transition-all duration-150 text-left select-none cursor-pointer"
-            >
-              <span className="text-xs font-bold text-primary uppercase tracking-[0.05em] flex items-center gap-2">
-                <svg
-                  className={`w-3.5 h-3.5 text-secondary transition-transform duration-200 ${
-                    isCommentsExpanded ? "rotate-90 text-brand" : ""
-                  }`}
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                >
-                  <polyline points="9 18 15 12 9 6" />
-                </svg>
-                View Analyzed Comments ({report.analyses.length})
-              </span>
-              <span className="text-xs text-secondary font-semibold">
-                {isCommentsExpanded ? "Hide" : "Show"}
-              </span>
-            </button>
-
-            {isCommentsExpanded && (
-              <div className="flex flex-col gap-3 max-h-[300px] overflow-y-auto pr-1 animate-fade-in mt-1">
-                {report.analyses.slice(0, visibleCount).map((c) => (
-                  <div
-                    key={c.comment_id}
-                    className="p-3.5 bg-surface border border-border-subtle rounded-xl flex flex-col gap-2 shadow-2xs hover:border-brand/20 transition-colors duration-150"
-                  >
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <div className="flex items-center gap-2">
-                        <img
-                          src={`https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(
-                            c.username
-                          )}`}
-                          alt={c.username}
-                          className="w-6 h-6 rounded-full bg-surface-raised border border-border"
-                        />
-                        <span className="text-xs font-bold text-primary truncate max-w-[150px]">
-                          {c.username}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={`py-0.5 px-2 rounded-full font-bold text-[0.68rem] tracking-wide inline-flex items-center gap-1 ${getSentimentBadge(
-                            c.sentiment
-                          )}`}
-                        >
-                          <span>{getSentimentIcon(c.sentiment)}</span>
-                          <span>{c.sentiment}</span>
-                        </span>
-                        {c.confidence_score !== undefined && (
-                          <span className="text-[0.65rem] text-disabled font-semibold">
-                            {Math.round(c.confidence_score * 100)}% conf
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <p className="text-xs text-primary leading-relaxed whitespace-pre-wrap">
-                      {c.text}
-                    </p>
-                    {c.reason && (
-                      <div className="text-[0.7rem] text-secondary font-medium mt-0.5 flex items-start gap-1">
-                        <span className="text-disabled font-semibold uppercase tracking-wider text-[0.62rem] mt-0.5">
-                          Theme:
-                        </span>
-                        <span>{c.reason}</span>
-                      </div>
-                    )}
-                  </div>
-                ))}
-
-                {/* Infinite Scroll Sentinel element */}
-                {visibleCount < report.analyses.length && (
-                  <div ref={sentinelRef} className="py-4 flex justify-center text-disabled text-xs font-medium">
-                    <div className="w-4 h-4 border-2 border-brand/20 border-t-brand rounded-full animate-spin mr-2"></div>
-                    Loading more comments...
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </>
+        <div className="flex flex-col gap-6 py-2">
+          <SentimentSummary summaries={report.summaries} />
+          <SentimentThemes themes={report.most_common_reasons} />
+          <CommentAnalysisList
+            analyses={report.analyses}
+            scrollContainerRef={scrollContainerRef}
+          />
+        </div>
       )}
     </BaseModal>
   );
