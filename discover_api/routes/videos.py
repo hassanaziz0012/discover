@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 # Import from the youtube package
 from youtube.fetch_popular_videos import get_popular_videos
 from youtube.recommend_related_videos import get_related_recommendations
-from youtube.sentiment_analyzer import analyze_video_comments_sentiment
+from youtube.sentiment_analyzer import analyze_video_comments_sentiment, get_cached_sentiment_analyses, extract_video_id
 from youtube.summarize_video import summarize_youtube_video
 
 logger = logging.getLogger("discover_api.routes.videos")
@@ -177,6 +177,25 @@ def analyze_video_sentiment(
     except Exception as e:
         logger.error(f"Unexpected error in analyze-video-sentiment: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to analyze video sentiment: {str(e)}")
+
+
+@router.get("/video-sentiment-reports")
+def get_video_sentiment_reports(
+    video_id: str = Query(..., description="YouTube video ID or URL")
+):
+    """
+    Get all cached sentiment analysis reports for a YouTube video.
+    """
+    try:
+        extracted_id = extract_video_id(video_id)
+        cached = get_cached_sentiment_analyses(extracted_id)
+        return cached
+    except ValueError as e:
+        logger.error(f"Validation error in get-video-sentiment-reports: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Unexpected error in get-video-sentiment-reports: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch cached reports: {str(e)}")
 
 
 @router.post("/summarize")

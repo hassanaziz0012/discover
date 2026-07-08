@@ -7,10 +7,78 @@ then formats and sends them to Gemini-3.5-flash via LangChain to run sentiment a
 
 import os
 import re
+import json
 import logging
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Optional, List, Dict
 
 logger = logging.getLogger("discover_api.youtube.sentiment_analyzer")
+
+
+def get_sentiment_cache_file_path() -> Path:
+    """
+    Get the path to the sentiment_analysis.json cache file.
+    """
+    return Path(__file__).parent / "cache" / "sentiment_analysis.json"
+
+
+def save_sentiment_analysis_to_cache(video_id: str, model: str, limit: int, report: Dict) -> None:
+    """
+    Append a sentiment analysis report to the sentiment_analysis.json cache file.
+    """
+    cache_file = get_sentiment_cache_file_path()
+    
+    # Ensure parent directory exists
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    analyses = []
+    if cache_file.exists():
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    analyses = data
+        except Exception as e:
+            logger.error(f"Failed to read sentiment cache file: {e}")
+            
+    # Prepare the new entry
+    new_entry = {
+        "video_id": video_id,
+        "model": model,
+        "limit": limit,
+        "created_at": datetime.now(UTC).isoformat(),
+        "report": report
+    }
+    analyses.append(new_entry)
+    
+    # Save back to file
+    try:
+        with open(cache_file, "w", encoding="utf-8") as f:
+            json.dump(analyses, f, indent=2, ensure_ascii=False)
+        logger.info(f"Successfully saved sentiment analysis for video {video_id} to cache.")
+    except Exception as e:
+        logger.error(f"Failed to write sentiment cache file: {e}")
+
+
+def get_cached_sentiment_analyses(video_id: str) -> List[Dict]:
+    """
+    Retrieve all cached sentiment analyses for a given video ID.
+    """
+    cache_file = get_sentiment_cache_file_path()
+    if not cache_file.exists():
+        return []
+        
+    try:
+        with open(cache_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, list):
+                # Filter by video_id
+                return [entry for entry in data if entry.get("video_id") == video_id]
+    except Exception as e:
+        logger.error(f"Failed to read sentiment cache file: {e}")
+        
+    return []
 
 SYSTEM_PROMPT = """You are an expert data analyst. Analyze the sentiment of the following YouTube video comments.
 
@@ -291,7 +359,7 @@ Comments:
     reason_counts = Counter(reasons)
     most_common_reasons = [{"reason": r, "count": c} for r, c in reason_counts.most_common()]
 
-    return {
+    report = {
         "video_id": video_id,
         "title": metadata["title"],
         "description": metadata["description"],
@@ -300,6 +368,11 @@ Comments:
         "most_common_reasons": most_common_reasons,
         "analyses": aggregated_results
     }
+
+    # Save report to cache
+    save_sentiment_analysis_to_cache(video_id, model, limit, report)
+
+    return report
 
 
 
