@@ -208,3 +208,69 @@ def get_cached_creators() -> List[Dict[str, Any]]:
     result_list.sort(key=lambda c: c["subscriber_count"], reverse=True)
     
     return result_list
+
+
+def delete_cached_creator(channel_id: str) -> bool:
+    """
+    Deletes a cached creator/channel:
+    1. Removes UC*.json video cache file.
+    2. Removes the channel metadata from channels_metadata_cache.json.
+    3. Removes the channel from lists.json.
+    """
+    # 1. Validate channel_id format strictly
+    if not (len(channel_id) == 24 and channel_id.startswith("UC") and all(c.isalnum() or c in "-_" for c in channel_id)):
+        raise ValueError("Invalid channel ID format.")
+        
+    deleted_any = False
+    
+    # 2. Delete UC*.json
+    file_path = cache_dir / f"{channel_id}.json"
+    if file_path.exists():
+        try:
+            file_path.unlink()
+            deleted_any = True
+            logger.info(f"Deleted cache file for channel {channel_id}")
+        except Exception as e:
+            logger.error(f"Failed to delete cache file {file_path}: {e}")
+            
+    # 3. Delete from metadata cache
+    if metadata_file.exists():
+        try:
+            with open(metadata_file, "r", encoding="utf-8") as f:
+                cache_data = json.load(f)
+            if isinstance(cache_data, dict) and "channels" in cache_data:
+                if channel_id in cache_data["channels"]:
+                    del cache_data["channels"][channel_id]
+                    # Save the metadata cache back
+                    with open(metadata_file, "w", encoding="utf-8") as f:
+                        json.dump(cache_data, f, indent=2, ensure_ascii=False)
+                    deleted_any = True
+                    logger.info(f"Deleted metadata entry for channel {channel_id}")
+        except Exception as e:
+            logger.error(f"Failed to update metadata file after deleting channel {channel_id}: {e}")
+            
+    # 4. Clean up lists.json
+    lists_file = cache_dir / "lists.json"
+    if lists_file.exists():
+        try:
+            with open(lists_file, "r", encoding="utf-8") as f:
+                lists = json.load(f)
+            if isinstance(lists, list):
+                updated_lists = []
+                list_changed = False
+                for lst in lists:
+                    if isinstance(lst, dict) and "channels" in lst:
+                        orig_len = len(lst["channels"])
+                        lst["channels"] = [cid for cid in lst["channels"] if cid != channel_id]
+                        if len(lst["channels"]) != orig_len:
+                            list_changed = True
+                    updated_lists.append(lst)
+                if list_changed:
+                    with open(lists_file, "w", encoding="utf-8") as f:
+                        json.dump(updated_lists, f, indent=2, ensure_ascii=False)
+                    logger.info(f"Removed channel {channel_id} from lists.")
+        except Exception as e:
+            logger.error(f"Failed to clean up lists.json for channel {channel_id}: {e}")
+            
+    return deleted_any
+
