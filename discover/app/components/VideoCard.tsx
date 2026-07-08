@@ -70,13 +70,24 @@ export default function VideoCard({ video }: VideoCardProps) {
     <article className="group/card flex flex-col bg-transparent rounded-md overflow-hidden relative transition-all duration-250 ease-in-out hover:-translate-y-1" id={`video-card-${video.id}`}>
       {/* Thumbnail Wrap */}
       <a href={video.youtubeUrl} target="_blank" rel="noopener noreferrer" className="relative block w-full aspect-video rounded-md overflow-hidden border border-border-subtle bg-surface-raised">
-        <img
-          src={video.thumbnailUrl}
-          alt={video.title}
-          referrerPolicy="no-referrer"
-          className="w-full h-full object-cover transition-transform duration-250 ease-in-out group-hover/card:scale-[1.04]"
-          loading="lazy"
-        />
+        {video.thumbnailUrl ? (
+          <img
+            src={video.thumbnailUrl}
+            alt={video.title}
+            referrerPolicy="no-referrer"
+            className="w-full h-full object-cover transition-transform duration-250 ease-in-out group-hover/card:scale-[1.04]"
+            loading="lazy"
+          />
+        ) : (
+          <div
+            style={{
+              background: "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)"
+            }}
+            className="w-full h-full flex items-center justify-center text-zinc-400 font-semibold text-xs transition-transform duration-250 ease-in-out group-hover/card:scale-[1.04]"
+          >
+            <span>No Thumbnail</span>
+          </div>
+        )}
         <span className="absolute bottom-2 right-2 bg-black/82 text-white text-[0.72rem] font-semibold py-0.5 px-1.5 rounded tracking-[0.02em]">{video.duration}</span>
       </a>
 
