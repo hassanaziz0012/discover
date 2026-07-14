@@ -13,6 +13,7 @@ interface UseOutliersFeedProps {
   isFiltersLoaded: boolean;
   viewMode: string;
   customVideo: Video;
+  selectedListId: string;
 }
 
 // Helper to shuffle list
@@ -35,6 +36,7 @@ export function useOutliersFeed({
   isFiltersLoaded,
   viewMode,
   customVideo,
+  selectedListId,
 }: UseOutliersFeedProps) {
   // Outliers Fetching States
   const [videos, setVideos] = useState<Video[]>([]);
@@ -93,6 +95,9 @@ export function useOutliersFeed({
       if (excludeShorts) {
         queryParams.append("exclude_shorts", "true");
       }
+      if (selectedListId && selectedListId !== "all") {
+        queryParams.append("list", selectedListId);
+      }
 
       // Default days boost mapping if time range is specified
       if (timeRange && timeRange !== "all") {
@@ -144,7 +149,7 @@ export function useOutliersFeed({
   useEffect(() => {
     if (!isFiltersLoaded) return;
     fetchOutliers(1, true);
-  }, [debouncedSearchQuery, platform, timeRange, minOutlier, sortBy, excludeShorts, isFiltersLoaded]);
+  }, [debouncedSearchQuery, platform, timeRange, minOutlier, sortBy, excludeShorts, selectedListId, isFiltersLoaded]);
 
   // Infinite Scroll Trigger via Intersection Observer
   useEffect(() => {
@@ -169,7 +174,7 @@ export function useOutliersFeed({
     return () => {
       observer.disconnect();
     };
-  }, [hasMore, isLoading, page, debouncedSearchQuery, platform, timeRange, minOutlier, sortBy, excludeShorts, viewMode, isFiltersLoaded]);
+  }, [hasMore, isLoading, page, debouncedSearchQuery, platform, timeRange, minOutlier, sortBy, excludeShorts, selectedListId, viewMode, isFiltersLoaded]);
 
   // Actions
   const handleShuffleInputs = () => {

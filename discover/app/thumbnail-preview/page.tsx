@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import TabNavigation from "@/app/components/TabNavigation";
 import SearchBar from "@/app/components/SearchBar";
 import FilterModal from "@/app/components/FilterModal";
@@ -8,6 +8,9 @@ import CustomizerSidebar from "./components/CustomizerSidebar";
 import YouTubeSimulator from "./components/YouTubeSimulator";
 import SizeReadabilityGrid from "./components/SizeReadabilityGrid";
 import { Video } from "@/app/types/video";
+import { UserList } from "@/app/types/list";
+import { Creator } from "@/app/components/CreatorsList";
+import { API_BASE_URL } from "@/app/utils/constants";
 import { useThumbnailFilters } from "./hooks/useThumbnailFilters";
 import { useChannelCustomizer } from "./hooks/useChannelCustomizer";
 import { useOutliersFeed } from "./hooks/useOutliersFeed";
@@ -30,6 +33,39 @@ export default function ThumbnailPreviewPage() {
     setIsFilterModalOpen,
     isFiltersLoaded,
   } = useThumbnailFilters();
+
+  const [lists, setLists] = useState<UserList[]>([]);
+  const [selectedListId, setSelectedListId] = useState<string>("all");
+  const [creators, setCreators] = useState<Creator[]>([]);
+
+  useEffect(() => {
+    async function fetchLists() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/youtube/lists`);
+        if (response.ok) {
+          const data = await response.json();
+          setLists(data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch lists:", err);
+      }
+    }
+
+    async function fetchCreators() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/youtube/cached-creators`);
+        if (response.ok) {
+          const data = await response.json();
+          setCreators(data);
+        }
+      } catch (err) {
+        console.error("Fetch creators error:", err);
+      }
+    }
+
+    fetchLists();
+    fetchCreators();
+  }, []);
 
   const {
     viewMode,
@@ -98,6 +134,7 @@ export default function ThumbnailPreviewPage() {
     isFiltersLoaded,
     viewMode,
     customVideo,
+    selectedListId,
   });
 
   const handleResetFields = () => {
@@ -158,6 +195,10 @@ export default function ThumbnailPreviewPage() {
             handleShuffleInputs={handleShuffleInputs}
             handleResetFields={handleResetFields}
             onCollapse={() => setIsSidebarCollapsed(true)}
+            lists={lists}
+            selectedListId={selectedListId}
+            setSelectedListId={setSelectedListId}
+            creators={creators}
           />
         )}
 
