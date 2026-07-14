@@ -10,10 +10,10 @@ export function useChannelCustomizer() {
 
   // Thumbnail Customizer States
   const [videoTitle, setVideoTitle] = useState("");
-  const [duration, setDuration] = useState("");
-  const [views, setViews] = useState("");
-  const [relativeTime, setRelativeTime] = useState("");
-  const [outlierScore, setOutlierScore] = useState<number>(2.5);
+  const [duration, setDuration] = useState("13:20");
+  const [views, setViews] = useState("7 views");
+  const [relativeTime, setRelativeTime] = useState("1 day ago");
+  const [outlierScore, setOutlierScore] = useState<number>(0);
   const [customImageSrc, setCustomImageSrc] = useState<string | null>(null);
 
   // Database Synced Channel States
@@ -45,6 +45,20 @@ export function useChannelCustomizer() {
       }
     }
     loadChannelDetails();
+  }, []);
+
+  // Set theme based on OS preference on client-side mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+      setPreviewTheme(mediaQuery.matches ? "dark" : "light");
+      
+      const handler = (e: MediaQueryListEvent) => {
+        setPreviewTheme(e.matches ? "dark" : "light");
+      };
+      mediaQuery.addEventListener("change", handler);
+      return () => mediaQuery.removeEventListener("change", handler);
+    }
   }, []);
 
   // Image Upload handler
@@ -91,14 +105,16 @@ export function useChannelCustomizer() {
   // Reset helper
   const resetCustomizerFields = () => {
     setVideoTitle("");
-    setDuration("");
-    setViews("");
-    setRelativeTime("");
-    setOutlierScore(2.5);
+    setDuration("13:20");
+    setViews("7 views");
+    setRelativeTime("1 day ago");
+    setOutlierScore(0);
     setCustomImageSrc(null);
     setChannelName(dbChannel.name);
     setChannelUrl(dbChannel.url);
     setProfilePicture(dbChannel.profile_picture);
+    const isDarkMode = typeof window !== "undefined" ? window.matchMedia("(prefers-color-scheme: dark)").matches : true;
+    setPreviewTheme(isDarkMode ? "dark" : "light");
   };
 
   return {
