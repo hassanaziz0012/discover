@@ -11,12 +11,14 @@ import { UserList } from "./types/list";
 import EditListModal from "./components/EditListModal";
 import LoadingFooter from "./components/LoadingFooter";
 import ListPills from "./components/ListPills";
+import ExpandableSearchBar from "./components/ExpandableSearchBar";
 import { formatViews, formatDuration, timeAgo } from "./utils/format";
 
 import { API_BASE_URL } from "@/app/utils/constants";
 
 export default function Home() {
   // Navigation & Filtering States
+  const [topSearchQuery, setTopSearchQuery] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
 
   // Lists States
@@ -310,8 +312,8 @@ export default function Home() {
     <div className="w-full max-w-[1280px] mx-auto px-4 sm:px-6 min-h-screen flex flex-col">
       {/* Search Input Bar (Top Section) */}
       <SearchBar
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
+        searchQuery={topSearchQuery}
+        setSearchQuery={setTopSearchQuery}
         onOpenFilters={() => setIsFilterModalOpen(true)}
         activePlatform={platform}
         activeTimeRange={timeRange}
@@ -337,18 +339,29 @@ export default function Home() {
           </div>
         ) : (
           <>
-            {/* List Selection Pill Tags for Discover tab */}
-            {creators.length > 0 && (
-              <div className="mb-6 mt-4 border-b border-border-subtle/50 pb-4">
-                <ListPills
-                  lists={lists}
-                  selectedListId={selectedListId}
-                  onSelectListId={setSelectedListId}
-                  creators={creators}
-                  onManageListClick={() => setIsEditListModalOpen(true)}
+            {/* List Selection Pill Tags and Mini Search Bar for Discover tab */}
+            <div className="mb-6 mt-4 border-b border-border-subtle/50 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
+              <div className="flex-1 min-w-0">
+                {creators.length > 0 && (
+                  <ListPills
+                    lists={lists}
+                    selectedListId={selectedListId}
+                    onSelectListId={setSelectedListId}
+                    creators={creators}
+                    onManageListClick={() => setIsEditListModalOpen(true)}
+                  />
+                )}
+              </div>
+              <div className="shrink-0 self-end sm:self-auto">
+                <ExpandableSearchBar
+                  query={searchQuery}
+                  setQuery={setSearchQuery}
+                  placeholder="Search videos or creators..."
+                  title="Search videos"
+                  ariaLabel="Search videos"
                 />
               </div>
-            )}
+            </div>
 
             <VideoGrid videos={videos} onResetFilters={handleResetFilters} />
 
