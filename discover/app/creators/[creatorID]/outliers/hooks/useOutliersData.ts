@@ -35,12 +35,12 @@ export function useOutliersData(creatorID: string): UseOutliersDataResult {
 
   // Dynamic Query Parameter States (passed to backend API)
   const [daysBoost, setDaysBoost] = useState<string>("30"); // Recency boost time-frame cutoff (default 30 days)
-  const [limit, setLimit] = useState<string>("30"); // Max videos retrieved from YouTube API
+  const [limit, setLimit] = useState<string>("all"); // Max videos retrieved from YouTube API
   const [excludeShorts, setExcludeShorts] = useState<boolean>(false);
 
   // Client-side Filter States (applied locally to the fetched results)
   const [searchQuery, setSearchQuery] = useState("");
-  const [minOutlier, setMinOutlier] = useState<number>(1.5); // Default outlier score filter threshold
+  const [minOutlier, setMinOutlier] = useState<number>(0); // Default outlier score filter threshold
   const [sortBy, setSortBy] = useState<string>("outlierScore"); // Sort key
 
   // Clipboard copy feedback
@@ -105,7 +105,8 @@ export function useOutliersData(creatorID: string): UseOutliersDataResult {
   // Reset Filters to default values
   const handleResetFilters = () => {
     setSearchQuery("");
-    setMinOutlier(1.5);
+    setMinOutlier(0);
+    setLimit("all");
     setSortBy("outlierScore");
     handleSetExcludeShorts(false);
   };
