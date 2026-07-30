@@ -4,6 +4,8 @@ import { OutlierSearchSectionProps } from "./types";
 export default function OutlierSearchSection({
   outlierSearchQuery,
   setOutlierSearchQuery,
+  searchSource,
+  setSearchSource,
   suggestedTitles,
   isSuggesting,
   suggestError,
@@ -13,7 +15,9 @@ export default function OutlierSearchSection({
   return (
     <div className="flex flex-col gap-2 border-t border-border-subtle/30 pt-4">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-bold text-primary uppercase tracking-wider">Outliers Search Query</span>
+        <span className="text-xs font-bold text-primary uppercase tracking-wider">
+          {searchSource === "live" ? "Live Search Query" : "Outliers Search Query"}
+        </span>
         {outlierSearchQuery && (
           <button
             onClick={() => setOutlierSearchQuery("")}
@@ -23,6 +27,33 @@ export default function OutlierSearchSection({
           </button>
         )}
       </div>
+
+      {/* Tiny Source Switcher Option */}
+      <div className="flex items-center justify-between bg-surface-raised border border-border-subtle p-0.5 rounded-lg text-[10px] font-semibold">
+        <button
+          type="button"
+          onClick={() => setSearchSource("database")}
+          className={`flex-1 py-1 px-2 rounded-md transition-all cursor-pointer text-center ${
+            searchSource === "database"
+              ? "bg-[#8B5CF6] text-white shadow-xs"
+              : "text-secondary hover:text-primary"
+          }`}
+        >
+          Database
+        </button>
+        <button
+          type="button"
+          onClick={() => setSearchSource("live")}
+          className={`flex-1 py-1 px-2 rounded-md transition-all cursor-pointer text-center ${
+            searchSource === "live"
+              ? "bg-[#8B5CF6] text-white shadow-xs"
+              : "text-secondary hover:text-primary"
+          }`}
+        >
+          Live (YouTube)
+        </button>
+      </div>
+
       <div className="relative flex items-center">
         <div className="absolute left-3 text-secondary pointer-events-none flex items-center">
           {isSearchingOutliers ? (
@@ -42,7 +73,7 @@ export default function OutlierSearchSection({
           value={outlierSearchQuery}
           onChange={(e) => setOutlierSearchQuery(e.target.value)}
           className="w-full text-xs bg-bg border border-border-subtle rounded-lg pl-8 pr-7 py-2 text-primary focus:outline-none focus:border-[#8B5CF6] transition-colors"
-          placeholder="Search outliers (e.g. Coding, Gaming...)"
+          placeholder={searchSource === "live" ? "Search YouTube live..." : "Search outliers (e.g. Coding, Gaming...)"}
         />
         {outlierSearchQuery && (
           <button
@@ -55,7 +86,9 @@ export default function OutlierSearchSection({
         )}
       </div>
       <span className="text-[10px] text-secondary">
-        Filter feed to only show outliers matching this topic or keyword.
+        {searchSource === "live"
+          ? "Show live YouTube search results directly in simulator."
+          : "Filter feed to only show outliers matching this topic or keyword."}
       </span>
 
       {/* AI Suggested Titles Pills */}

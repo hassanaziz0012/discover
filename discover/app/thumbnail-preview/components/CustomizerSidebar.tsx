@@ -20,6 +20,8 @@ export interface CustomizerSidebarProps {
   setPreviewTheme: React.Dispatch<React.SetStateAction<"dark" | "light">>;
   outlierSearchQuery: string;
   setOutlierSearchQuery: (query: string) => void;
+  searchSource: "database" | "live";
+  setSearchSource: (source: "database" | "live") => void;
   isSearchingOutliers?: boolean;
   videoTitle: string;
   setVideoTitle: (title: string) => void;
@@ -61,6 +63,8 @@ export default function CustomizerSidebar({
   setPreviewTheme,
   outlierSearchQuery,
   setOutlierSearchQuery,
+  searchSource,
+  setSearchSource,
   isSearchingOutliers,
   videoTitle,
   setVideoTitle,
@@ -140,6 +144,8 @@ export default function CustomizerSidebar({
         <OutlierSearchSection
           outlierSearchQuery={outlierSearchQuery}
           setOutlierSearchQuery={setOutlierSearchQuery}
+          searchSource={searchSource}
+          setSearchSource={setSearchSource}
           suggestedTitles={suggestedTitles}
           isSuggesting={isSuggesting}
           suggestError={suggestError}

@@ -5,6 +5,7 @@ import { formatViews, formatDuration, timeAgo } from "@/app/utils/format";
 
 interface UseOutliersFeedProps {
   outlierSearchQuery: string;
+  searchSource?: "database" | "live";
   platform: string;
   timeRange: string;
   minOutlier: number;
@@ -28,6 +29,7 @@ const shuffleArray = <T,>(array: T[]): T[] => {
 
 export function useOutliersFeed({
   outlierSearchQuery,
+  searchSource = "database",
   platform,
   timeRange,
   minOutlier,
@@ -51,6 +53,7 @@ export function useOutliersFeed({
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(outlierSearchQuery);
   const lastFetchedPage = useRef<number>(0);
   const fetchIdRef = useRef<number>(0);
+  const nextPageTokenRef = useRef<string | null>(null);
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -66,7 +69,7 @@ export function useOutliersFeed({
   async function fetchOutliers(pageToFetch: number, isReset: boolean) {
     if (!isReset && isLoading) return;
 
-    if (!isReset && pageToFetch <= lastFetchedPage.current) {
+    if (!isReset && searchSource === "database" && pageToFetch <= lastFetchedPage.current) {
       return;
     }
 
@@ -75,6 +78,7 @@ export function useOutliersFeed({
     const prevLastFetched = lastFetchedPage.current;
     if (isReset) {
       lastFetchedPage.current = 1;
+      nextPageTokenRef.current = null;
       setIsResetting(true);
     } else {
       lastFetchedPage.current = pageToFetch;
@@ -83,67 +87,130 @@ export function useOutliersFeed({
     setIsLoading(true);
     setError(null);
     try {
-      const queryParams = new URLSearchParams({
-        page: pageToFetch.toString(),
-        limit: "12",
-        sort_by: sortBy,
-      });
-      if (debouncedSearchQuery.trim()) {
-        queryParams.append("search", debouncedSearchQuery.trim());
-      }
-      if (minOutlier !== undefined) {
-        queryParams.append("min_outlier", minOutlier.toString());
-      }
-      if (timeRange && timeRange !== "all") {
-        queryParams.append("time_range", timeRange);
-      }
-      if (excludeShorts) {
-        queryParams.append("exclude_shorts", "true");
-      }
-      if (selectedListId && selectedListId !== "all") {
-        queryParams.append("list", selectedListId);
-      }
+      if (searchSource === "live") {
+        const queryParams = new URLSearchParams({
+          limit: "12",
+        });
+        if (debouncedSearchQuery.trim()) {
+          queryParams.append("search", debouncedSearchQuery.trim());
+        }
+        if (!isReset && nextPageTokenRef.current) {
+          queryParams.append("page_token", nextPageTokenRef.current);
+        }
 
-      // Default days boost mapping if time range is specified
-      if (timeRange && timeRange !== "all") {
-        let daysBoostVal = "30";
-        if (timeRange === "weekly") daysBoostVal = "7";
-        else if (timeRange === "monthly") daysBoostVal = "30";
-        else if (timeRange === "3months") daysBoostVal = "90";
-        else if (timeRange === "6months") daysBoostVal = "180";
-        queryParams.append("days", daysBoostVal);
-      }
+        const response = await fetch(`${API_BASE_URL}/api/youtube/search-live?${queryParams.toString()}`);
 
-      const response = await fetch(`${API_BASE_URL}/api/youtube/all-outliers?${queryParams.toString()}`);
+        // Stale request check
+        if (currentFetchId !== fetchIdRef.current) return;
 
-      // Stale request check
-      if (currentFetchId !== fetchIdRef.current) return;
+        if (response.ok) {
+          const data = await response.json();
+          nextPageTokenRef.current = data.next_page_token || null;
+          const newMappedVideos: Video[] = (data.videos || []).map((o: any) => ({
+            id: o.video_id,
+            title: o.title,
+            creator: o.channel_name,
+            creatorAvatar: o.channel_avatar || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(o.channel_name)}`,
+            views: formatViews(o.view_count),
+            viewsRaw: o.view_count || 0,
+            publishedAt: timeAgo(o.published_at),
+            publishedAtRaw: new Date(o.published_at),
+            duration: formatDuration(o.duration),
+            outlierScore: undefined, // Skip outlier score for live YouTube search results
+            thumbnailUrl: o.thumbnail_url,
+            category: "Live Search",
+            youtubeUrl: o.url,
+            channelId: o.channel_id,
+          }));
 
-      if (response.ok) {
-        const data = await response.json();
-        const newMappedVideos: Video[] = data.videos.map((o: any) => ({
-          id: o.video_id,
-          title: o.title,
-          creator: o.channel_name,
-          creatorAvatar: o.channel_avatar || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(o.channel_name)}`,
-          views: formatViews(o.view_count),
-          viewsRaw: o.view_count,
-          publishedAt: timeAgo(o.published_at),
-          publishedAtRaw: new Date(o.published_at),
-          duration: formatDuration(o.duration),
-          outlierScore: o.score,
-          thumbnailUrl: o.thumbnail_url,
-          category: "Creators",
-          youtubeUrl: o.url,
-        }));
-
-        setVideos((prev) => (isReset ? newMappedVideos : [...prev, ...newMappedVideos]));
-        setHasMore(data.has_more);
-        setPage(pageToFetch);
+          setVideos((prev) => {
+            const combined = isReset ? newMappedVideos : [...prev, ...newMappedVideos];
+            const seen = new Set<string>();
+            return combined.filter((v) => {
+              if (!v.id || seen.has(v.id)) return false;
+              seen.add(v.id);
+              return true;
+            });
+          });
+          setHasMore(Boolean(data.has_more));
+          setPage(pageToFetch);
+        } else {
+          lastFetchedPage.current = prevLastFetched;
+          const errJson = await response.json().catch(() => ({}));
+          setError(errJson.detail || `Failed to fetch live search videos (Server status: ${response.status})`);
+        }
       } else {
-        lastFetchedPage.current = prevLastFetched;
-        const errJson = await response.json().catch(() => ({}));
-        setError(errJson.detail || `Failed to fetch outliers (Server status: ${response.status})`);
+        const queryParams = new URLSearchParams({
+          page: pageToFetch.toString(),
+          limit: "12",
+          sort_by: sortBy,
+        });
+        if (debouncedSearchQuery.trim()) {
+          queryParams.append("search", debouncedSearchQuery.trim());
+        }
+        if (minOutlier !== undefined) {
+          queryParams.append("min_outlier", minOutlier.toString());
+        }
+        if (timeRange && timeRange !== "all") {
+          queryParams.append("time_range", timeRange);
+        }
+        if (excludeShorts) {
+          queryParams.append("exclude_shorts", "true");
+        }
+        if (selectedListId && selectedListId !== "all") {
+          queryParams.append("list", selectedListId);
+        }
+
+        // Default days boost mapping if time range is specified
+        if (timeRange && timeRange !== "all") {
+          let daysBoostVal = "30";
+          if (timeRange === "weekly") daysBoostVal = "7";
+          else if (timeRange === "monthly") daysBoostVal = "30";
+          else if (timeRange === "3months") daysBoostVal = "90";
+          else if (timeRange === "6months") daysBoostVal = "180";
+          queryParams.append("days", daysBoostVal);
+        }
+
+        const response = await fetch(`${API_BASE_URL}/api/youtube/all-outliers?${queryParams.toString()}`);
+
+        // Stale request check
+        if (currentFetchId !== fetchIdRef.current) return;
+
+        if (response.ok) {
+          const data = await response.json();
+          const newMappedVideos: Video[] = data.videos.map((o: any) => ({
+            id: o.video_id,
+            title: o.title,
+            creator: o.channel_name,
+            creatorAvatar: o.channel_avatar || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(o.channel_name)}`,
+            views: formatViews(o.view_count),
+            viewsRaw: o.view_count,
+            publishedAt: timeAgo(o.published_at),
+            publishedAtRaw: new Date(o.published_at),
+            duration: formatDuration(o.duration),
+            outlierScore: o.score,
+            thumbnailUrl: o.thumbnail_url,
+            category: "Creators",
+            youtubeUrl: o.url,
+            channelId: o.channel_id,
+          }));
+
+          setVideos((prev) => {
+            const combined = isReset ? newMappedVideos : [...prev, ...newMappedVideos];
+            const seen = new Set<string>();
+            return combined.filter((v) => {
+              if (!v.id || seen.has(v.id)) return false;
+              seen.add(v.id);
+              return true;
+            });
+          });
+          setHasMore(data.has_more);
+          setPage(pageToFetch);
+        } else {
+          lastFetchedPage.current = prevLastFetched;
+          const errJson = await response.json().catch(() => ({}));
+          setError(errJson.detail || `Failed to fetch outliers (Server status: ${response.status})`);
+        }
       }
     } catch (err) {
       if (currentFetchId !== fetchIdRef.current) return;
@@ -162,7 +229,7 @@ export function useOutliersFeed({
   useEffect(() => {
     if (!isFiltersLoaded) return;
     fetchOutliers(1, true);
-  }, [debouncedSearchQuery, platform, timeRange, minOutlier, sortBy, excludeShorts, selectedListId, isFiltersLoaded]);
+  }, [debouncedSearchQuery, searchSource, platform, timeRange, minOutlier, sortBy, excludeShorts, selectedListId, isFiltersLoaded]);
 
   // Infinite Scroll Trigger via Intersection Observer
   useEffect(() => {

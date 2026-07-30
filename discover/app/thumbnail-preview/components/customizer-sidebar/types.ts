@@ -24,6 +24,8 @@ export interface ChannelListPillsProps {
 export interface OutlierSearchSectionProps {
   outlierSearchQuery: string;
   setOutlierSearchQuery: (query: string) => void;
+  searchSource: "database" | "live";
+  setSearchSource: (source: "database" | "live") => void;
   suggestedTitles: string[];
   isSuggesting: boolean;
   suggestError: string | null;

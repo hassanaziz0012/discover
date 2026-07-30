@@ -103,6 +103,8 @@ export default function ThumbnailPreviewPage() {
     resetCustomizerFields,
   } = useChannelCustomizer();
 
+  const [searchSource, setSearchSource] = useState<"database" | "live">("database");
+
   // Custom Video Object
   const customVideo = useMemo<Video>(() => ({
     id: "custom-video-preview-id",
@@ -129,6 +131,7 @@ export default function ThumbnailPreviewPage() {
     retryFetch,
   } = useOutliersFeed({
     outlierSearchQuery,
+    searchSource,
     platform,
     timeRange,
     minOutlier,
@@ -165,7 +168,7 @@ export default function ThumbnailPreviewPage() {
 
       {/* Main Content Dashboard */}
       <main className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 mt-4">
-        
+
         {/* Left Settings Control Panel (Sidebar): 3 cols */}
         {!isSidebarCollapsed && (
           <CustomizerSidebar
@@ -177,6 +180,8 @@ export default function ThumbnailPreviewPage() {
             setPreviewTheme={setPreviewTheme}
             outlierSearchQuery={outlierSearchQuery}
             setOutlierSearchQuery={setOutlierSearchQuery}
+            searchSource={searchSource}
+            setSearchSource={setSearchSource}
             isSearchingOutliers={isSearchingOutliers}
             videoTitle={videoTitle}
             setVideoTitle={setVideoTitle}
