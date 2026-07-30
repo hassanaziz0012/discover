@@ -19,6 +19,8 @@ export default function ThumbnailPreviewPage() {
   const {
     searchQuery,
     setSearchQuery,
+    outlierSearchQuery,
+    setOutlierSearchQuery,
     platform,
     setPlatform,
     timeRange,
@@ -120,12 +122,13 @@ export default function ThumbnailPreviewPage() {
 
   const {
     displayVideos,
+    isSearchingOutliers,
     error,
     handleShuffleInputs,
     resetFeed,
     retryFetch,
   } = useOutliersFeed({
-    searchQuery,
+    outlierSearchQuery,
     platform,
     timeRange,
     minOutlier,
@@ -138,6 +141,8 @@ export default function ThumbnailPreviewPage() {
   });
 
   const handleResetFields = () => {
+    setSearchQuery("");
+    setOutlierSearchQuery("");
     resetCustomizerFields();
     resetFeed();
   };
@@ -170,6 +175,9 @@ export default function ThumbnailPreviewPage() {
             setPreviewLayout={setPreviewLayout}
             previewTheme={previewTheme}
             setPreviewTheme={setPreviewTheme}
+            outlierSearchQuery={outlierSearchQuery}
+            setOutlierSearchQuery={setOutlierSearchQuery}
+            isSearchingOutliers={isSearchingOutliers}
             videoTitle={videoTitle}
             setVideoTitle={setVideoTitle}
             duration={duration}
@@ -242,6 +250,8 @@ export default function ThumbnailPreviewPage() {
                   previewTheme={previewTheme}
                   videos={displayVideos}
                   customImageSrc={customImageSrc}
+                  isLoading={isSearchingOutliers}
+                  searchQuery={outlierSearchQuery}
                 />
               )}
 
