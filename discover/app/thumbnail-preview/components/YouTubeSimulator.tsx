@@ -10,6 +10,8 @@ export interface YouTubeSimulatorProps {
   previewTheme: "dark" | "light";
   videos: Video[];
   customImageSrc: string | null;
+  isLoading?: boolean;
+  searchQuery?: string;
 }
 
 export default function YouTubeSimulator({
@@ -17,15 +19,31 @@ export default function YouTubeSimulator({
   previewTheme,
   videos,
   customImageSrc,
+  isLoading,
+  searchQuery,
 }: YouTubeSimulatorProps) {
   return (
     <div
-      className={`p-6 rounded-xl shadow-sm flex flex-col items-center justify-start min-h-[380px] w-full transition-all duration-200 border ${
+      className={`p-6 rounded-xl shadow-sm flex flex-col items-center justify-start min-h-[380px] w-full transition-all duration-200 border relative ${
         previewTheme === "dark"
           ? "bg-[#0f0f0f] border-zinc-800 text-white"
           : "bg-white border-zinc-200 text-black"
       }`}
     >
+      {/* Loading Overlay Badge */}
+      {isLoading && (
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] rounded-xl z-20 flex flex-col items-center justify-center gap-3 animate-fade-in">
+          <div className="flex items-center gap-3 bg-surface border border-border-subtle px-4.5 py-3 rounded-full shadow-lg">
+            <svg className="animate-spin w-5 h-5 text-[#8B5CF6]" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            <span className="text-xs font-bold text-primary">
+              {searchQuery ? `Searching outliers for "${searchQuery}"...` : "Updating outliers feed..."}
+            </span>
+          </div>
+        </div>
+      )}
       {/* Desktop Grid (Monitor Home) */}
       {previewLayout === "desktop-grid" && (
         <DesktopGridLayout
