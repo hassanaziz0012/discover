@@ -4,7 +4,7 @@ import { API_BASE_URL } from "@/app/utils/constants";
 import { formatViews, formatDuration, timeAgo } from "@/app/utils/format";
 
 interface UseOutliersFeedProps {
-  searchQuery: string;
+  outlierSearchQuery: string;
   platform: string;
   timeRange: string;
   minOutlier: number;
@@ -27,7 +27,7 @@ const shuffleArray = <T,>(array: T[]): T[] => {
 };
 
 export function useOutliersFeed({
-  searchQuery,
+  outlierSearchQuery,
   platform,
   timeRange,
   minOutlier,
@@ -43,34 +43,39 @@ export function useOutliersFeed({
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [customVideoIndex, setCustomVideoIndex] = useState(0);
 
   // Search query debouncing
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(searchQuery);
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(outlierSearchQuery);
   const lastFetchedPage = useRef<number>(0);
+  const fetchIdRef = useRef<number>(0);
 
   useEffect(() => {
     const handler = setTimeout(() => {
-      setDebouncedSearchQuery(searchQuery);
+      setDebouncedSearchQuery(outlierSearchQuery);
     }, 300);
 
     return () => {
       clearTimeout(handler);
     };
-  }, [searchQuery]);
+  }, [outlierSearchQuery]);
 
   // Fetch Outliers from Backend
   async function fetchOutliers(pageToFetch: number, isReset: boolean) {
-    if (isLoading) return;
+    if (!isReset && isLoading) return;
 
     if (!isReset && pageToFetch <= lastFetchedPage.current) {
       return;
     }
 
+    const currentFetchId = ++fetchIdRef.current;
+
     const prevLastFetched = lastFetchedPage.current;
     if (isReset) {
       lastFetchedPage.current = 1;
+      setIsResetting(true);
     } else {
       lastFetchedPage.current = pageToFetch;
     }
@@ -110,6 +115,10 @@ export function useOutliersFeed({
       }
 
       const response = await fetch(`${API_BASE_URL}/api/youtube/all-outliers?${queryParams.toString()}`);
+
+      // Stale request check
+      if (currentFetchId !== fetchIdRef.current) return;
+
       if (response.ok) {
         const data = await response.json();
         const newMappedVideos: Video[] = data.videos.map((o: any) => ({
@@ -137,11 +146,15 @@ export function useOutliersFeed({
         setError(errJson.detail || `Failed to fetch outliers (Server status: ${response.status})`);
       }
     } catch (err) {
+      if (currentFetchId !== fetchIdRef.current) return;
       lastFetchedPage.current = prevLastFetched;
       console.error("Fetch outliers error:", err);
       setError("Unable to connect to the backend server.");
     } finally {
-      setIsLoading(false);
+      if (currentFetchId === fetchIdRef.current) {
+        setIsLoading(false);
+        setIsResetting(false);
+      }
     }
   }
 
@@ -198,10 +211,14 @@ export function useOutliersFeed({
     return list;
   }, [videos, customVideo, customVideoIndex]);
 
+  const isDebouncing = outlierSearchQuery.trim() !== debouncedSearchQuery.trim();
+  const isSearchingOutliers = isDebouncing || isResetting;
+
   return {
     videos,
     displayVideos,
     isLoading,
+    isSearchingOutliers,
     error,
     handleShuffleInputs,
     resetFeed,
