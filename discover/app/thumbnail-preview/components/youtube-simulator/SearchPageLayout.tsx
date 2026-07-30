@@ -1,4 +1,5 @@
 import React from "react";
+import Link from "next/link";
 import { Video } from "@/app/types/video";
 import CreatorAvatar from "./CreatorAvatar";
 import ThumbnailWrapper from "./ThumbnailWrapper";
@@ -17,10 +18,11 @@ export default function SearchPageLayout({
 }: SearchPageLayoutProps) {
   return (
     <div className="w-full max-w-[800px] flex flex-col gap-6 animate-scale-up">
-      {videos.map((vid) => {
+      {videos.map((vid, index) => {
         const isCustom = vid.id === "custom-video-preview-id";
+        const channelHref = `/creators/${encodeURIComponent(vid.channelId || vid.creator)}/outliers`;
         return (
-          <div key={vid.id} className="flex flex-col sm:flex-row gap-4 group w-full">
+          <div key={`${vid.id}-${index}`} className="flex flex-col sm:flex-row gap-4 group w-full">
             <ThumbnailWrapper
               thumbnailUrl={vid.thumbnailUrl}
               customImageSrc={customImageSrc}
@@ -55,20 +57,22 @@ export default function SearchPageLayout({
               )}
 
               <div className="flex items-center gap-2 my-1">
-                <CreatorAvatar
-                  creator={vid.creator}
-                  creatorAvatar={vid.creatorAvatar}
-                  previewTheme={previewTheme}
-                  sizeClass="w-6 h-6"
-                  textSizeClass="text-[9px]"
-                />
-                <span
-                  className={`text-xs hover:underline cursor-pointer truncate font-medium ${
-                    previewTheme === "dark" ? "text-zinc-300" : "text-zinc-700"
-                  }`}
-                >
-                  {vid.creator}
-                </span>
+                <Link href={channelHref} className="flex items-center gap-2 max-w-full">
+                  <CreatorAvatar
+                    creator={vid.creator}
+                    creatorAvatar={vid.creatorAvatar}
+                    previewTheme={previewTheme}
+                    sizeClass="w-6 h-6"
+                    textSizeClass="text-[9px]"
+                  />
+                  <span
+                    className={`text-xs hover:underline cursor-pointer truncate font-medium ${
+                      previewTheme === "dark" ? "text-zinc-300" : "text-zinc-700"
+                    }`}
+                  >
+                    {vid.creator}
+                  </span>
+                </Link>
               </div>
 
               <p

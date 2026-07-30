@@ -1,4 +1,5 @@
 import React from "react";
+import Link from "next/link";
 import { Video } from "@/app/types/video";
 import CreatorAvatar from "./CreatorAvatar";
 import ThumbnailWrapper from "./ThumbnailWrapper";
@@ -40,10 +41,11 @@ export default function MobileLayout({
 
       {/* Mobile YT Feed Cards Scroll Container */}
       <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-5 scrollbar-none">
-        {videos.map((vid) => {
+        {videos.map((vid, index) => {
           const isCustom = vid.id === "custom-video-preview-id";
+          const channelHref = `/creators/${encodeURIComponent(vid.channelId || vid.creator)}/outliers`;
           return (
-            <div key={vid.id} className="flex flex-col gap-2.5 w-full">
+            <div key={`${vid.id}-${index}`} className="flex flex-col gap-2.5 w-full">
               <ThumbnailWrapper
                 thumbnailUrl={vid.thumbnailUrl}
                 customImageSrc={customImageSrc}
@@ -55,13 +57,15 @@ export default function MobileLayout({
               />
 
               <div className="flex gap-2.5 px-1 text-left">
-                <CreatorAvatar
-                  creator={vid.creator}
-                  creatorAvatar={vid.creatorAvatar}
-                  previewTheme={previewTheme}
-                  sizeClass="w-8 h-8"
-                  textSizeClass="text-xs"
-                />
+                <Link href={channelHref} tabIndex={-1}>
+                  <CreatorAvatar
+                    creator={vid.creator}
+                    creatorAvatar={vid.creatorAvatar}
+                    previewTheme={previewTheme}
+                    sizeClass="w-8 h-8"
+                    textSizeClass="text-xs"
+                  />
+                </Link>
                 <div className="flex flex-col gap-0.5 min-w-0">
                   <h4
                     className={`text-[12px] font-bold line-clamp-2 leading-[1.1rem] ${
@@ -70,13 +74,25 @@ export default function MobileLayout({
                   >
                     {vid.title}
                   </h4>
-                  <span
-                    className={`text-[10px] ${
+                  <div
+                    className={`text-[10px] flex items-center flex-wrap gap-1 ${
                       previewTheme === "dark" ? "text-zinc-400" : "text-zinc-600"
                     }`}
                   >
-                    {[vid.creator, vid.views, vid.publishedAt].filter(Boolean).join(" • ")}
-                  </span>
+                    <Link
+                      href={channelHref}
+                      className="hover:underline cursor-pointer truncate font-medium"
+                    >
+                      {vid.creator}
+                    </Link>
+                    {(vid.views || vid.publishedAt) && (
+                      <span>
+                        • {vid.views}
+                        {vid.views && vid.publishedAt && " • "}
+                        {vid.publishedAt}
+                      </span>
+                    )}
+                  </div>
                   {vid.outlierScore !== undefined && vid.outlierScore !== null && (
                     <div className="mt-1 flex">
                       <OutlierBadge

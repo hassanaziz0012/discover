@@ -1,4 +1,5 @@
 import React from "react";
+import Link from "next/link";
 import { Video } from "@/app/types/video";
 import ThumbnailWrapper from "./ThumbnailWrapper";
 import OutlierBadge from "./OutlierBadge";
@@ -16,10 +17,11 @@ export default function DesktopListLayout({
 }: DesktopListLayoutProps) {
   return (
     <div className="w-full max-w-[400px] flex flex-col gap-4 animate-scale-up">
-      {videos.map((vid) => {
+      {videos.map((vid, index) => {
         const isCustom = vid.id === "custom-video-preview-id";
+        const channelHref = `/creators/${encodeURIComponent(vid.channelId || vid.creator)}/outliers`;
         return (
-          <div key={vid.id} className="flex gap-2.5 group w-full">
+          <div key={`${vid.id}-${index}`} className="flex gap-2.5 group w-full">
             <ThumbnailWrapper
               thumbnailUrl={vid.thumbnailUrl}
               customImageSrc={customImageSrc}
@@ -38,13 +40,14 @@ export default function DesktopListLayout({
               >
                 {vid.title}
               </h4>
-              <span
+              <Link
+                href={channelHref}
                 className={`text-[11px] hover:underline cursor-pointer mt-1 truncate ${
                   previewTheme === "dark" ? "text-zinc-400" : "text-zinc-600"
                 }`}
               >
                 {vid.creator}
-              </span>
+              </Link>
               {(vid.views || vid.publishedAt) && (
                 <span
                   className={`text-[11px] ${
