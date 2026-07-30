@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { ApiResponse } from "../types";
 import { formatViews } from "../../../../utils/format";
 
@@ -9,6 +9,12 @@ interface OutliersHeaderProps {
 }
 
 export function OutliersHeader({ data, isCopied, onCopyChannelId }: OutliersHeaderProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const description = data?.channel_description;
+  const isLongDescription = Boolean(
+    description && (description.length > 120 || description.includes("\n"))
+  );
+
   return (
     <div className="flex md:flex-row flex-col md:items-start items-start gap-6 pb-6 border-b border-border-subtle mb-8">
       <img
@@ -61,10 +67,25 @@ export function OutliersHeader({ data, isCopied, onCopyChannelId }: OutliersHead
           </button>
         </div>
 
-        {data?.channel_description && (
-          <p className="text-[0.9rem] text-secondary max-w-[650px] leading-relaxed mt-2 line-clamp-3" title={data.channel_description}>
-            {data.channel_description}
-          </p>
+        {description && (
+          <div className="mt-2 max-w-[650px]">
+            <p
+              className={`text-[0.9rem] text-secondary leading-relaxed transition-all duration-200 ${
+                !isExpanded && isLongDescription ? "line-clamp-2" : ""
+              } ${isExpanded ? "whitespace-pre-line" : ""}`}
+            >
+              {description}
+            </p>
+            {isLongDescription && (
+              <button
+                type="button"
+                onClick={() => setIsExpanded((prev) => !prev)}
+                className="mt-1 text-[0.82rem] font-semibold text-brand hover:underline focus:outline-none transition-colors inline-flex items-center gap-1 cursor-pointer"
+              >
+                {isExpanded ? "Show less" : "Show more"}
+              </button>
+            )}
+          </div>
         )}
       </div>
 
