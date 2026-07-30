@@ -8,6 +8,7 @@ export interface CreatorsHeaderProps {
   onRefresh: () => Promise<void>;
   isSyncing?: boolean;
   onSync?: () => Promise<void>;
+  onDiscover?: () => void;
   refreshStatus: { type: "success" | "error"; message: string } | null;
   setRefreshStatus: (status: { type: "success" | "error"; message: string } | null) => void;
   channelSearchQuery?: string;
@@ -22,6 +23,7 @@ export default function CreatorsHeader({
   onRefresh,
   isSyncing = false,
   onSync,
+  onDiscover,
   refreshStatus,
   setRefreshStatus,
   channelSearchQuery = "",
@@ -131,6 +133,29 @@ export default function CreatorsHeader({
                 )}
               </svg>
               {isSyncing ? "Syncing Subscriptions..." : "Sync Subscriptions"}
+            </button>
+          )}
+
+          {/* Discover Top Creators Button */}
+          {onDiscover && (
+            <button
+              onClick={onDiscover}
+              disabled={isRefreshing || isSyncing}
+              className={`flex items-center gap-2 px-4 py-2 text-[0.82rem] font-bold rounded-full border border-brand/30 bg-brand/10 text-brand hover:bg-brand/20 hover:border-brand/50 active:scale-[0.98] transition-all duration-150 ease-in-out shadow-xs select-none ${
+                isRefreshing || isSyncing ? "opacity-50 cursor-not-allowed" : ""
+              }`}
+              title="Discover top YouTube creators by category"
+            >
+              <svg
+                className="w-4 h-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+              >
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+              </svg>
+              Discover Creators
             </button>
           )}
         </div>
