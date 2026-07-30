@@ -22,6 +22,21 @@ export default function YouTubeSimulator({
   isLoading,
   searchQuery,
 }: YouTubeSimulatorProps) {
+  // Hardcoded filter: Shorts do not have traditional thumbnails, so NEVER render YouTube Shorts in thumbnail preview simulator
+  const filteredVideos = React.useMemo(() => {
+    return videos.filter((vid) => {
+      if (vid.isShort) return false;
+      if (vid.youtubeUrl && vid.youtubeUrl.includes("/shorts/")) return false;
+      if (vid.duration) {
+        const parts = vid.duration.split(":").map((p) => parseInt(p, 10));
+        if (parts.length === 2 && parts[0] === 0 && !isNaN(parts[1]) && parts[1] <= 60) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [videos]);
+
   return (
     <div
       className={`p-6 rounded-xl shadow-sm flex flex-col items-center justify-start min-h-[380px] w-full transition-all duration-200 border relative ${
@@ -47,7 +62,7 @@ export default function YouTubeSimulator({
       {/* Desktop Grid (Monitor Home) */}
       {previewLayout === "desktop-grid" && (
         <DesktopGridLayout
-          videos={videos}
+          videos={filteredVideos}
           previewTheme={previewTheme}
           customImageSrc={customImageSrc}
         />
@@ -56,7 +71,7 @@ export default function YouTubeSimulator({
       {/* Search Page Result View */}
       {previewLayout === "search-page" && (
         <SearchPageLayout
-          videos={videos}
+          videos={filteredVideos}
           previewTheme={previewTheme}
           customImageSrc={customImageSrc}
         />
@@ -65,7 +80,7 @@ export default function YouTubeSimulator({
       {/* Sidebar List (Related Videos) */}
       {previewLayout === "desktop-list" && (
         <DesktopListLayout
-          videos={videos}
+          videos={filteredVideos}
           previewTheme={previewTheme}
           customImageSrc={customImageSrc}
         />
@@ -74,7 +89,7 @@ export default function YouTubeSimulator({
       {/* Mobile Feed inside phone border mockup */}
       {previewLayout === "mobile" && (
         <MobileLayout
-          videos={videos}
+          videos={filteredVideos}
           previewTheme={previewTheme}
           customImageSrc={customImageSrc}
         />

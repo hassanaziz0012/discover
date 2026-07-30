@@ -121,6 +121,7 @@ export function useOutliersFeed({
             category: "Live Search",
             youtubeUrl: o.url,
             channelId: o.channel_id,
+            isShort: Boolean(o.is_short),
           }));
 
           setVideos((prev) => {
@@ -193,6 +194,7 @@ export function useOutliersFeed({
             category: "Creators",
             youtubeUrl: o.url,
             channelId: o.channel_id,
+            isShort: Boolean(o.is_short),
           }));
 
           setVideos((prev) => {
