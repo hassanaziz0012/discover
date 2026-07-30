@@ -1,10 +1,12 @@
 import os
 import json
 import logging
+from typing import List, Optional
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from youtube.utils import get_youtube_client, resolve_channel_id
+from agentic.suggest_titles import suggest_titles
 
 logger = logging.getLogger("discover_api.routes.thumbnails")
 
@@ -18,6 +20,9 @@ class ChannelMetadata(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="The name of the channel")
     url: str = Field(..., min_length=1, max_length=200, description="The YouTube channel URL or handle")
     profile_picture: str = Field("", max_length=500, description="The URL of the channel's profile picture")
+
+class SuggestTitlesResponse(BaseModel):
+    titles: List[str] = Field(..., description="List of suggested search query titles")
 
 def ensure_db():
     """Ensure that the database directory and channel.json file exist."""
@@ -115,3 +120,28 @@ def save_channel(channel: ChannelMetadata):
     except Exception as e:
         logger.error(f"Unexpected error saving channel data: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred while saving channel details.")
+
+@router.get("/suggest-titles", response_model=SuggestTitlesResponse)
+def get_suggested_titles(
+    topic: Optional[str] = Query(None, description="Optional topic or search query context"),
+    video_title: Optional[str] = Query(None, description="Optional video title context"),
+    channel_name: Optional[str] = Query(None, description="Optional channel name context")
+):
+    """
+    Suggest search queries for YouTube outlier research using Groq GPT OSS 120B model.
+    Returns structured JSON with a list of suggested title queries.
+    """
+    try:
+        titles = suggest_titles(
+            topic=topic,
+            video_title=video_title,
+            channel_name=channel_name
+        )
+        return SuggestTitlesResponse(titles=titles)
+    except Exception as e:
+        logger.error(f"Error in /suggest-titles endpoint: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate title suggestions: {str(e)}"
+        )
+
