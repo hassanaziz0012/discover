@@ -104,7 +104,9 @@ def get_live_search(
     limit: int = Query(12, ge=1, le=50, description="Items per page"),
     order: str = Query("relevance", description="Sort order: viewCount, relevance, date, rating, title"),
     exclude_shorts: bool = Query(False, description="Filter out YouTube Shorts"),
-    video_duration: Optional[str] = Query(None, description="YouTube duration filter: any, short, medium, long")
+    video_duration: Optional[str] = Query(None, description="YouTube duration filter: any, short, medium, long"),
+    relevance_language: Optional[str] = Query("en", description="Relevance language ISO code (e.g. en)"),
+    region_code: Optional[str] = Query(None, description="Region ISO country code (e.g. US)")
 ):
     """
     Directly query YouTube Data API v3 for live search results.
@@ -116,7 +118,9 @@ def get_live_search(
             limit=limit,
             order=order,
             exclude_shorts=exclude_shorts,
-            video_duration=video_duration
+            video_duration=video_duration,
+            relevance_language=relevance_language,
+            region_code=region_code
         )
         return result
     except ValueError as e:

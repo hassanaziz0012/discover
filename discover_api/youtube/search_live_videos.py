@@ -22,6 +22,8 @@ def search_live_videos(
     order: str = "relevance",
     exclude_shorts: bool = False,
     video_duration: Optional[str] = None,
+    relevance_language: Optional[str] = "en",
+    region_code: Optional[str] = None,
     api_key: Optional[str] = None
 ) -> Dict[str, Any]:
     """
@@ -33,6 +35,8 @@ def search_live_videos(
     :param order: Sorting order ('viewCount', 'relevance', 'date', 'rating', 'title').
     :param exclude_shorts: If True, filters out Shorts from the return list.
     :param video_duration: API filter ('any', 'short', 'medium', 'long').
+    :param relevance_language: Preferred ISO 639-1 language code (e.g. 'en'). Defaults to 'en'.
+    :param region_code: Preferred ISO 3166-1 alpha-2 country code (e.g. 'US').
     :param api_key: YouTube API key.
     """
     target_api_key = api_key or os.getenv("YOUTUBE_API_KEY")
@@ -50,6 +54,12 @@ def search_live_videos(
         "order": order,
         "maxResults": min(max(1, limit), 50),
     }
+
+    if relevance_language:
+        search_params["relevanceLanguage"] = relevance_language
+
+    if region_code:
+        search_params["regionCode"] = region_code
 
     if video_duration and video_duration != "any":
         search_params["videoDuration"] = video_duration
