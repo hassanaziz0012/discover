@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 
 export function useThumbnailFilters() {
   const [searchQuery, setSearchQuery] = useState("");
+  const [outlierSearchQuery, setOutlierSearchQuery] = useState("");
   const [platform, setPlatformState] = useState("YouTube");
   const [timeRange, setTimeRangeState] = useState("all");
   const [minOutlier, setMinOutlierState] = useState(1.5);
@@ -70,6 +71,8 @@ export function useThumbnailFilters() {
   return {
     searchQuery,
     setSearchQuery,
+    outlierSearchQuery,
+    setOutlierSearchQuery,
     platform,
     setPlatform,
     timeRange,
