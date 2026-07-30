@@ -13,4 +13,6 @@ export interface Video {
   category: string;
   youtubeUrl: string;
   isShort?: boolean;
+  channelId?: string;
 }
+

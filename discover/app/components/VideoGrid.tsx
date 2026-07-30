@@ -38,8 +38,8 @@ export default function VideoGrid({ videos, onResetFilters }: VideoGridProps) {
 
   return (
     <div className="grid sm:grid-cols-[repeat(auto-fill,minmax(280px,1fr))] grid-cols-1 gap-x-3.5 sm:gap-y-6 gap-y-4 w-full mb-12">
-      {videos.map((video) => (
-        <VideoCard key={video.id} video={video} />
+      {videos.map((video, index) => (
+        <VideoCard key={`${video.id}-${index}`} video={video} />
       ))}
     </div>
   );

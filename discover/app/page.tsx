@@ -200,9 +200,18 @@ export default function Home() {
           thumbnailUrl: o.thumbnail_url,
           category: "Creators",
           youtubeUrl: o.url,
+          channelId: o.channel_id,
         }));
 
-        setVideos((prev) => (isReset ? newMappedVideos : [...prev, ...newMappedVideos]));
+        setVideos((prev) => {
+          const combined = isReset ? newMappedVideos : [...prev, ...newMappedVideos];
+          const seen = new Set<string>();
+          return combined.filter((v) => {
+            if (!v.id || seen.has(v.id)) return false;
+            seen.add(v.id);
+            return true;
+          });
+        });
         setHasMore(data.has_more);
         setPage(pageToFetch);
       } else {
