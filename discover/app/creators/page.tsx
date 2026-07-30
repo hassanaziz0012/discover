@@ -9,6 +9,7 @@ import ListPills from "@/app/components/ListPills";
 import ManageListsModal from "@/app/components/ManageListsModal";
 import EditListModal from "@/app/components/EditListModal";
 import RefreshReportModal, { RefreshReport } from "@/app/components/RefreshReportModal";
+import DiscoverCreatorsModal from "@/app/components/DiscoverCreatorsModal";
 import { UserList } from "@/app/types/list";
 import { API_BASE_URL } from "@/app/utils/constants";
 
@@ -22,6 +23,7 @@ export default function CreatorsPage() {
   const [selectedListId, setSelectedListId] = useState<string>("all");
   const [activeManageListCreator, setActiveManageListCreator] = useState<Creator | null>(null);
   const [isEditListModalOpen, setIsEditListModalOpen] = useState(false);
+  const [isDiscoverModalOpen, setIsDiscoverModalOpen] = useState(false);
 
   // SearchBar dummy state values for UI consistency
   const [platform] = useState("YouTube");
@@ -330,6 +332,7 @@ export default function CreatorsPage() {
             onRefresh={handleRefreshCreators}
             isSyncing={isSyncing}
             onSync={handleSyncSubscriptions}
+            onDiscover={() => setIsDiscoverModalOpen(true)}
             refreshStatus={refreshStatus}
             setRefreshStatus={setRefreshStatus}
             channelSearchQuery={channelSearchQuery}
@@ -385,6 +388,13 @@ export default function CreatorsPage() {
         allCreators={creators}
         onUpdateList={handleUpdateList}
         onDeleteList={handleDeleteList}
+      />
+
+      {/* Discover Creators Modal */}
+      <DiscoverCreatorsModal
+        isOpen={isDiscoverModalOpen}
+        onClose={() => setIsDiscoverModalOpen(false)}
+        onCreatorsAdded={fetchCreators}
       />
     </div>
   );
