@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 # Import from the youtube package
 from youtube.fetch_outliers import calculate_outliers, calculate_all_cached_outliers
+from youtube.search_live_videos import search_live_videos
 
 logger = logging.getLogger("discover_api.routes.outliers")
 
@@ -94,3 +95,34 @@ def get_all_outliers(
     except Exception as e:
         logger.error(f"Unexpected error in get_all_outliers: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to fetch all outliers: {e}")
+
+
+@router.get("/search-live")
+def get_live_search(
+    search: Optional[str] = Query("trending", description="Search term for YouTube videos"),
+    page_token: Optional[str] = Query(None, description="Page token for YouTube search pagination"),
+    limit: int = Query(12, ge=1, le=50, description="Items per page"),
+    order: str = Query("relevance", description="Sort order: viewCount, relevance, date, rating, title"),
+    exclude_shorts: bool = Query(False, description="Filter out YouTube Shorts"),
+    video_duration: Optional[str] = Query(None, description="YouTube duration filter: any, short, medium, long")
+):
+    """
+    Directly query YouTube Data API v3 for live search results.
+    """
+    try:
+        result = search_live_videos(
+            query=search or "trending",
+            page_token=page_token,
+            limit=limit,
+            order=order,
+            exclude_shorts=exclude_shorts,
+            video_duration=video_duration
+        )
+        return result
+    except ValueError as e:
+        logger.error(f"Validation error in search-live: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Unexpected error in search-live: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to search live videos: {e}")
+
