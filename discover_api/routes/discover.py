@@ -2,12 +2,15 @@ import logging
 import os
 import asyncio
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
+from db.session import get_db
+from db.models import Creator as CreatorModel
 from youtube.discover_top_creators import get_video_categories, discover_top_creators
 from youtube.fetch_videos import fetch_channel_videos
-from youtube.cached_creators import cache_dir, get_cached_creators, metadata_file
+from youtube.creators import get_creators
 
 logger = logging.getLogger("discover_api.routes.discover")
 
@@ -74,14 +77,11 @@ class BulkAddRequest(BaseModel):
 
 
 @router.post("/bulk-add-creators")
-async def bulk_add_creators(request: BulkAddRequest):
+async def bulk_add_creators(request: BulkAddRequest, db: Session = Depends(get_db)):
     """
-    Bulk-add YouTube creators by fetching all their videos and caching them.
+    Bulk-add YouTube creators by fetching all their videos and persisting them to PostgreSQL.
     Accepts a list of channel IDs and processes them concurrently.
-    Returns a sync report similar to /sync-subscriptions.
     """
-    import json
-
     channel_ids = request.channel_ids
     if not channel_ids:
         raise HTTPException(status_code=400, detail="channel_ids list cannot be empty.")
@@ -95,21 +95,15 @@ async def bulk_add_creators(request: BulkAddRequest):
     if not api_key:
         raise HTTPException(status_code=500, detail="YOUTUBE_API_KEY environment variable is not set.")
 
-    # Filter out already-cached channels
-    cached_ids = set()
-    if cache_dir.exists():
-        for file in cache_dir.glob("UC*.json"):
-            name = file.stem
-            if len(name) == 24 and name.startswith("UC") and all(c.isalnum() or c in "-_" for c in name):
-                cached_ids.add(name)
-
-    new_channel_ids = [cid for cid in channel_ids if cid not in cached_ids]
+    # Filter out already existing channels in database
+    existing_cids = {c.channel_id for c in db.query(CreatorModel.channel_id).all()}
+    new_channel_ids = [cid for cid in channel_ids if cid not in existing_cids]
     already_cached_count = len(channel_ids) - len(new_channel_ids)
 
     if not new_channel_ids:
-        updated_creators = get_cached_creators()
+        updated_creators = get_creators(db=db)
         return {
-            "message": f"All {already_cached_count} channels are already cached.",
+            "message": f"All {already_cached_count} channels are already in database.",
             "added": [],
             "errors": [],
             "already_cached_count": already_cached_count,
@@ -123,7 +117,7 @@ async def bulk_add_creators(request: BulkAddRequest):
         async with sem:
             try:
                 videos, new_count, cached_count = await asyncio.to_thread(
-                    fetch_channel_videos, api_key, cid, False, True
+                    fetch_channel_videos, api_key, cid, False, True, db
                 )
                 return {
                     "channel_id": cid,
@@ -141,20 +135,8 @@ async def bulk_add_creators(request: BulkAddRequest):
     tasks = [add_single_channel(cid) for cid in new_channel_ids]
     results = await asyncio.gather(*tasks)
 
-    # Force refresh metadata cache so new channels appear
-    if metadata_file.exists():
-        try:
-            with open(metadata_file, "r", encoding="utf-8") as f:
-                meta_data = json.load(f)
-            if isinstance(meta_data, dict):
-                meta_data["updated_at"] = ""  # Force cache expiry
-                with open(metadata_file, "w", encoding="utf-8") as f:
-                    json.dump(meta_data, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            logger.warning(f"Failed to reset metadata cache age: {e}")
-
     # Load updated creators metadata
-    updated_creators = get_cached_creators()
+    updated_creators = get_creators(db=db)
     creators_by_id = {c["channel_id"]: c for c in updated_creators}
 
     added_list = []
@@ -173,7 +155,7 @@ async def bulk_add_creators(request: BulkAddRequest):
 
     status_msg = f"Successfully added {len(added_list)} new channels."
     if already_cached_count > 0:
-        status_msg += f" {already_cached_count} channels were already cached."
+        status_msg += f" {already_cached_count} channels were already in database."
     if errors:
         status_msg += f" {len(errors)} channels failed."
 
@@ -184,3 +166,4 @@ async def bulk_add_creators(request: BulkAddRequest):
         "already_cached_count": already_cached_count,
         "creators": updated_creators,
     }
+

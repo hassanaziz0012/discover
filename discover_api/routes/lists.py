@@ -1,13 +1,12 @@
 import logging
-import json
 import uuid
-from pathlib import Path
 from typing import Optional, Dict, Any, List
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
-# Import from the youtube package
-from youtube.cached_creators import get_cached_creators
+from db.session import get_db
+from db.models import UserList, ListCreator, Creator
 
 logger = logging.getLogger("discover_api.routes.lists")
 
@@ -27,169 +26,145 @@ class ChannelAdd(BaseModel):
     channel_id: str = Field(..., min_length=1, max_length=50, description="YouTube channel ID to add to list", example="UC-8QAzbLcRglXeN_MY9blyw")
 
 
-# ── Lists File Persistence Helpers ─────────────────────────────────────────────
-
-def get_lists_file_path() -> Path:
-    """Resolve the lists.json file path in cache directory."""
-    from youtube.cached_creators import cache_dir
-    return cache_dir / "lists.json"
-
-def load_lists() -> List[Dict[str, Any]]:
-    """Load lists configuration from the local cache file."""
-    path = get_lists_file_path()
-    if not path.exists():
-        return []
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Error reading lists file: {e}")
-        return []
-
-def save_lists(lists: List[Dict[str, Any]]):
-    """Save lists configuration to the local cache file."""
-    path = get_lists_file_path()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(lists, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        logger.error(f"Error writing lists file: {e}")
-        raise HTTPException(status_code=500, detail="Failed to save list data.")
-
-
 # ── Lists Endpoints ────────────────────────────────────────────────────────────
 
+def format_user_list(user_list: UserList) -> Dict[str, Any]:
+    """Helper to convert UserList ORM model to API response dictionary."""
+    return {
+        "id": user_list.id,
+        "name": user_list.name,
+        "description": user_list.description or "",
+        "channels": [lc.channel_id for lc in user_list.creators]
+    }
+
+
 @router.get("/lists", response_model=List[Dict[str, Any]])
-def get_lists():
-    """Retrieve all customized lists."""
-    return load_lists()
+def get_lists(db: Session = Depends(get_db)):
+    """Retrieve all customized lists from PostgreSQL."""
+    user_lists = db.query(UserList).all()
+    return [format_user_list(ul) for ul in user_lists]
+
 
 @router.post("/lists")
-def create_list(data: ListCreate):
-    """Create a new customized list."""
+def create_list(data: ListCreate, db: Session = Depends(get_db)):
+    """Create a new customized list in PostgreSQL."""
     name = data.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="List name cannot be empty or only spaces.")
     
-    lists = load_lists()
     # Check if a list with the same name already exists (case-insensitive)
-    if any(l["name"].lower() == name.lower() for l in lists):
+    existing = db.query(UserList).filter(UserList.name.ilike(name)).first()
+    if existing:
         raise HTTPException(status_code=400, detail="A list with this name already exists.")
         
-    new_list = {
-        "id": str(uuid.uuid4()),
-        "name": name,
-        "channels": []
-    }
-    lists.append(new_list)
-    save_lists(lists)
-    return new_list
+    new_list = UserList(
+        id=str(uuid.uuid4()),
+        name=name,
+        description=""
+    )
+    db.add(new_list)
+    db.commit()
+    db.refresh(new_list)
+    return format_user_list(new_list)
+
 
 @router.put("/lists/{list_id}")
-def update_list(list_id: str, data: ListUpdate):
-    """Update a list's name and/or channels (CRUD - Update)."""
+def update_list(list_id: str, data: ListUpdate, db: Session = Depends(get_db)):
+    """Update a list's name and/or channels in PostgreSQL."""
     name = data.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="List name cannot be empty or only spaces.")
         
-    lists = load_lists()
-    target_list = None
-    for l in lists:
-        if l["id"] == list_id:
-            target_list = l
-            break
-            
+    target_list = db.query(UserList).filter(UserList.id == list_id).first()
     if not target_list:
         raise HTTPException(status_code=404, detail="List not found.")
         
     # Check duplicate names for other lists (case-insensitive)
-    if any(l["name"].lower() == name.lower() and l["id"] != list_id for l in lists):
+    duplicate = db.query(UserList).filter(UserList.name.ilike(name), UserList.id != list_id).first()
+    if duplicate:
         raise HTTPException(status_code=400, detail="A list with this name already exists.")
         
-    target_list["name"] = name
+    target_list.name = name
 
     # Handle bulk channels update if provided
     if data.channels is not None:
-        # Validate each channel_id to prevent injection or directory traversal
-        cached_creators = get_cached_creators()
-        cached_cids = {c["channel_id"] for c in cached_creators}
-        
         validated_cids = []
         for cid in data.channels:
             cid = cid.strip()
             if not cid.startswith("UC") or len(cid) != 24 or not all(c.isalnum() or c in "-_" for c in cid):
                 raise HTTPException(status_code=400, detail=f"Invalid YouTube channel ID format: {cid}")
-            if cid not in cached_cids:
-                raise HTTPException(status_code=404, detail=f"Channel '{cid}' not found in cached creators. Please search and add it first.")
+            
+            creator_exists = db.query(Creator).filter(Creator.channel_id == cid).first()
+            if not creator_exists:
+                raise HTTPException(status_code=404, detail=f"Channel '{cid}' not found in database. Please search and add it first.")
             validated_cids.append(cid)
         
-        target_list["channels"] = validated_cids
+        # Remove old channel associations
+        db.query(ListCreator).filter(ListCreator.list_id == list_id).delete()
+        db.flush()
 
-    save_lists(lists)
-    return target_list
+        # Add new associations
+        for cid in validated_cids:
+            db.add(ListCreator(list_id=list_id, channel_id=cid))
+
+    db.commit()
+    db.refresh(target_list)
+    return format_user_list(target_list)
+
 
 @router.delete("/lists/{list_id}")
-def delete_list(list_id: str):
-    """Delete a list (CRUD - Delete)."""
-    lists = load_lists()
-    filtered_lists = [l for l in lists if l["id"] != list_id]
-    if len(filtered_lists) == len(lists):
+def delete_list(list_id: str, db: Session = Depends(get_db)):
+    """Delete a list from PostgreSQL."""
+    target_list = db.query(UserList).filter(UserList.id == list_id).first()
+    if not target_list:
         raise HTTPException(status_code=404, detail="List not found.")
-    save_lists(filtered_lists)
+    
+    db.delete(target_list)
+    db.commit()
     return {"success": True, "message": f"List '{list_id}' deleted."}
 
+
 @router.post("/lists/{list_id}/channels")
-def add_channel_to_list(list_id: str, data: ChannelAdd):
-    """Add a creator/channel to a specific list."""
+def add_channel_to_list(list_id: str, data: ChannelAdd, db: Session = Depends(get_db)):
+    """Add a creator/channel to a specific list in PostgreSQL."""
     channel_id = data.channel_id.strip()
     
-    # Input Validation: Check channel ID format to prevent any directory traversal or malicious injection
     if not channel_id.startswith("UC") or len(channel_id) != 24 or not all(c.isalnum() or c in "-_" for c in channel_id):
         raise HTTPException(status_code=400, detail="Invalid YouTube channel ID format.")
         
-    # Check if the channel actually exists in cached creators
-    cached_creators = get_cached_creators()
-    if not any(c["channel_id"] == channel_id for c in cached_creators):
-         raise HTTPException(status_code=404, detail="Channel not found in cached creators. Please search and add it first.")
+    creator_exists = db.query(Creator).filter(Creator.channel_id == channel_id).first()
+    if not creator_exists:
+        raise HTTPException(status_code=404, detail="Channel not found in database. Please search and add it first.")
 
-    lists = load_lists()
-    target_list = None
-    for l in lists:
-        if l["id"] == list_id:
-            target_list = l
-            break
-            
+    target_list = db.query(UserList).filter(UserList.id == list_id).first()
     if not target_list:
         raise HTTPException(status_code=404, detail="List not found.")
         
-    if channel_id in target_list["channels"]:
-        return target_list  # Already exists in list, return ok
+    existing_assoc = db.query(ListCreator).filter(ListCreator.list_id == list_id, ListCreator.channel_id == channel_id).first()
+    if not existing_assoc:
+        db.add(ListCreator(list_id=list_id, channel_id=channel_id))
+        db.commit()
+        db.refresh(target_list)
         
-    target_list["channels"].append(channel_id)
-    save_lists(lists)
-    return target_list
+    return format_user_list(target_list)
+
 
 @router.delete("/lists/{list_id}/channels/{channel_id}")
-def remove_channel_from_list(list_id: str, channel_id: str):
-    """Remove a creator/channel from a specific list."""
-    # Input Validation: Check channel ID format
+def remove_channel_from_list(list_id: str, channel_id: str, db: Session = Depends(get_db)):
+    """Remove a creator/channel from a specific list in PostgreSQL."""
     if not channel_id.startswith("UC") or len(channel_id) != 24 or not all(c.isalnum() or c in "-_" for c in channel_id):
         raise HTTPException(status_code=400, detail="Invalid YouTube channel ID format.")
         
-    lists = load_lists()
-    target_list = None
-    for l in lists:
-        if l["id"] == list_id:
-            target_list = l
-            break
-            
+    target_list = db.query(UserList).filter(UserList.id == list_id).first()
     if not target_list:
         raise HTTPException(status_code=404, detail="List not found.")
         
-    if channel_id not in target_list["channels"]:
+    assoc = db.query(ListCreator).filter(ListCreator.list_id == list_id, ListCreator.channel_id == channel_id).first()
+    if not assoc:
         raise HTTPException(status_code=404, detail="Channel not found in this list.")
         
-    target_list["channels"].remove(channel_id)
-    save_lists(lists)
-    return target_list
+    db.delete(assoc)
+    db.commit()
+    db.refresh(target_list)
+    return format_user_list(target_list)
+

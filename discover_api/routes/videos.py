@@ -1,17 +1,21 @@
 import logging
 from typing import Optional, Dict, Any
-from fastapi import APIRouter, HTTPException, Query, Body
 from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Query, Body, Depends
+from sqlalchemy.orm import Session
+from db.session import get_db
+
 
 # Import from the youtube package
 from youtube.fetch_popular_videos import get_popular_videos
 from youtube.recommend_related_videos import get_related_recommendations
-from youtube.sentiment_analyzer import analyze_video_comments_sentiment, get_cached_sentiment_analyses, extract_video_id
+from youtube.sentiment_analyzer import analyze_video_comments_sentiment, get_sentiment_analyses, extract_video_id
 from youtube.summarize_video import summarize_youtube_video
 
 logger = logging.getLogger("discover_api.routes.videos")
 
 router = APIRouter(prefix="/api/youtube", tags=["YouTube"])
+
 
 
 # ── Request / Response Models ──────────────────────────────────────────────────
@@ -181,21 +185,23 @@ def analyze_video_sentiment(
 
 @router.get("/video-sentiment-reports")
 def get_video_sentiment_reports(
-    video_id: str = Query(..., description="YouTube video ID or URL")
+    video_id: str = Query(..., description="YouTube video ID or URL"),
+    db: Session = Depends(get_db)
 ):
     """
-    Get all cached sentiment analysis reports for a YouTube video.
+    Get all sentiment analysis reports for a YouTube video from PostgreSQL database.
     """
     try:
         extracted_id = extract_video_id(video_id)
-        cached = get_cached_sentiment_analyses(extracted_id)
-        return cached
+        reports = get_sentiment_analyses(extracted_id, db=db)
+        return reports
     except ValueError as e:
         logger.error(f"Validation error in get-video-sentiment-reports: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Unexpected error in get-video-sentiment-reports: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to fetch cached reports: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch reports: {str(e)}")
+
 
 
 @router.post("/summarize")

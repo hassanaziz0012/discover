@@ -1,9 +1,10 @@
 import logging
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
+from sqlalchemy.orm import Session
 
-# Import from the youtube package
-from youtube.fetch_outliers import calculate_outliers, calculate_all_cached_outliers
+from db.session import get_db
+from youtube.fetch_outliers import calculate_outliers, calculate_all_outliers
 from youtube.search_live_videos import search_live_videos
 
 logger = logging.getLogger("discover_api.routes.outliers")
@@ -61,21 +62,23 @@ def get_all_outliers(
     time_range: Optional[str] = Query(None, description="Publish time range cutoff"),
     sort_by: str = Query("outlierScore", description="Sort criteria: outlierScore, views, newest"),
     exclude_shorts: bool = Query(False, description="Whether to exclude YouTube Shorts from results"),
-    list_id: Optional[str] = Query(None, alias="list", description="Channel list ID or name to filter by")
+    list_id: Optional[str] = Query(None, alias="list", description="Channel list ID or name to filter by"),
+    db: Session = Depends(get_db)
 ):
     """
-    Retrieve aggregated outliers from all cached creators completely offline,
+    Retrieve aggregated outliers from all creators in PostgreSQL database,
     applying sorting, filtering, and pagination.
     """
     try:
-        all_outliers = calculate_all_cached_outliers(
+        all_outliers = calculate_all_outliers(
             days=days,
             search=search,
             min_outlier=min_outlier,
             time_range=time_range,
             sort_by=sort_by,
             exclude_shorts=exclude_shorts,
-            list_id=list_id
+            list_id=list_id,
+            db=db
         )
 
         total = len(all_outliers)
@@ -95,6 +98,7 @@ def get_all_outliers(
     except Exception as e:
         logger.error(f"Unexpected error in get_all_outliers: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to fetch all outliers: {e}")
+
 
 
 @router.get("/search-live")
