@@ -13,6 +13,7 @@ import LoadingFooter from "./components/LoadingFooter";
 import ListPills from "./components/ListPills";
 import ExpandableSearchBar from "./components/ExpandableSearchBar";
 import { formatViews, formatDuration, timeAgo } from "./utils/format";
+import PresetPills from "./components/PresetPills";
 
 import { API_BASE_URL } from "@/app/utils/constants";
 
@@ -33,6 +34,7 @@ export default function Home() {
   const [minOutlier, setMinOutlierState] = useState(1.5);
   const [sortBy, setSortByState] = useState("outlierScore");
   const [excludeShorts, setExcludeShortsState] = useState(false);
+  const [activePreset, setActivePreset] = useState<string | null>(null);
   const [isFiltersLoaded, setIsFiltersLoaded] = useState(false);
 
   // Custom setters that update both state and localStorage
@@ -172,6 +174,9 @@ export default function Home() {
       if (selectedListId && selectedListId !== "all") {
         queryParams.append("list", selectedListId);
       }
+      if (activePreset) {
+        queryParams.append("preset", activePreset);
+      }
 
       // Default days boost mapping if time range is specified
       if (timeRange && timeRange !== "all") {
@@ -279,7 +284,7 @@ export default function Home() {
   useEffect(() => {
     if (!isFiltersLoaded) return;
     fetchOutliers(1, true);
-  }, [debouncedSearchQuery, minOutlier, timeRange, sortBy, excludeShorts, selectedListId, isFiltersLoaded]);
+  }, [debouncedSearchQuery, minOutlier, timeRange, sortBy, excludeShorts, selectedListId, activePreset, isFiltersLoaded]);
 
   // Infinite Scroll Trigger via Intersection Observer
   useEffect(() => {
@@ -304,7 +309,7 @@ export default function Home() {
     return () => {
       observer.disconnect();
     };
-  }, [hasMore, isLoading, page, debouncedSearchQuery, minOutlier, timeRange, sortBy, excludeShorts, selectedListId, isFiltersLoaded]);
+  }, [hasMore, isLoading, page, debouncedSearchQuery, minOutlier, timeRange, sortBy, excludeShorts, selectedListId, activePreset, isFiltersLoaded]);
 
   // Reset all filters to default
   const handleResetFilters = () => {
@@ -315,6 +320,7 @@ export default function Home() {
     setSortBy("outlierScore");
     setExcludeShorts(false);
     setSelectedListId("all");
+    setActivePreset(null);
   };
 
   return (
@@ -348,27 +354,30 @@ export default function Home() {
           </div>
         ) : (
           <>
-            {/* List Selection Pill Tags and Mini Search Bar for Discover tab */}
-            <div className="mb-6 mt-4 border-b border-border-subtle/50 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
-              <div className="flex-1 min-w-0">
-                {creators.length > 0 && (
-                  <ListPills
-                    lists={lists}
-                    selectedListId={selectedListId}
-                    onSelectListId={setSelectedListId}
-                    creators={creators}
-                    onManageListClick={() => setIsEditListModalOpen(true)}
+            {/* Preset Categories and List Selection Pill Tags */}
+            <div className="mb-6 mt-4 border-b border-border-subtle/50 pb-4 flex flex-col gap-3 px-1">
+              <PresetPills activePreset={activePreset} onSelectPreset={setActivePreset} />
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  {creators.length > 0 && (
+                    <ListPills
+                      lists={lists}
+                      selectedListId={selectedListId}
+                      onSelectListId={setSelectedListId}
+                      creators={creators}
+                      onManageListClick={() => setIsEditListModalOpen(true)}
+                    />
+                  )}
+                </div>
+                <div className="shrink-0 self-end sm:self-auto">
+                  <ExpandableSearchBar
+                    query={searchQuery}
+                    setQuery={setSearchQuery}
+                    placeholder="Search videos or creators..."
+                    title="Search videos"
+                    ariaLabel="Search videos"
                   />
-                )}
-              </div>
-              <div className="shrink-0 self-end sm:self-auto">
-                <ExpandableSearchBar
-                  query={searchQuery}
-                  setQuery={setSearchQuery}
-                  placeholder="Search videos or creators..."
-                  title="Search videos"
-                  ariaLabel="Search videos"
-                />
+                </div>
               </div>
             </div>
 
