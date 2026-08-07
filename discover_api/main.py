@@ -76,8 +76,16 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     """
-    Log application startup details and display an elegant console banner.
+    Log application startup details and initialize database tables.
     """
+    try:
+        from db.session import engine
+        from db.models import Base
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database schemas & tables verified.")
+    except Exception as e:
+        logger.error(f"Failed to initialize database tables on startup: {e}")
+
     banner = """
     ===================================================
                 DISCOVER API SERVER STARTED
@@ -89,6 +97,7 @@ async def startup_event():
     """
     for line in banner.strip().split("\n"):
         logger.info(line)
+
 
 
 # --- ROUTES ---
