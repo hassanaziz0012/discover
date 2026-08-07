@@ -57,6 +57,7 @@ def get_all_outliers(
     page: int = Query(1, ge=1, description="Page number for pagination"),
     limit: int = Query(12, ge=1, le=100, description="Items per page"),
     search: Optional[str] = Query(None, description="Search term for video title or channel name"),
+    preset: Optional[str] = Query(None, description="Preset filter category: breakouts, hidden_gems, proven_at_scale, viral_now, all_time_greats"),
     min_outlier: Optional[float] = Query(None, description="Minimum outlier score threshold"),
     days: Optional[float] = Query(None, description="Recency boost days multiplier"),
     time_range: Optional[str] = Query(None, description="Publish time range cutoff"),
@@ -67,7 +68,7 @@ def get_all_outliers(
 ):
     """
     Retrieve aggregated outliers from all creators in PostgreSQL database,
-    applying sorting, filtering, and pagination.
+    applying sorting, filtering, preset criteria, and pagination.
     """
     try:
         all_outliers = calculate_all_outliers(
@@ -78,6 +79,7 @@ def get_all_outliers(
             sort_by=sort_by,
             exclude_shorts=exclude_shorts,
             list_id=list_id,
+            preset=preset,
             db=db
         )
 

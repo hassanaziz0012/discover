@@ -166,12 +166,14 @@ def calculate_all_outliers(
     sort_by: str = "outlierScore",
     exclude_shorts: bool = False,
     list_id: Optional[str] = None,
+    preset: Optional[str] = None,
     db: Optional[Session] = None,
 ) -> list:
     """
     Retrieves aggregated outliers from PostgreSQL database,
-    applying sorting, filtering, and scoring.
+    applying sorting, filtering, preset criteria, and scoring.
     """
+    from sqlalchemy.orm import selectinload
     from db.session import SessionLocal
     from db.models import Creator as CreatorModel, Video as VideoModel, UserList, ListCreator
 
@@ -191,9 +193,22 @@ def calculate_all_outliers(
                 return []
 
         # Query creators
-        creator_query = db.query(CreatorModel)
+        creator_query = db.query(CreatorModel).options(selectinload(CreatorModel.videos))
         if target_channel_ids is not None:
             creator_query = creator_query.filter(CreatorModel.channel_id.in_(target_channel_ids))
+
+        # Push creator subscriber_count filtering to SQL if preset requires it
+        if preset:
+            p_lower = preset.lower()
+            if p_lower == "breakouts":
+                creator_query = creator_query.filter(CreatorModel.subscriber_count <= 50000)
+            elif p_lower == "hidden_gems":
+                creator_query = creator_query.filter(CreatorModel.subscriber_count <= 20000)
+            elif p_lower == "proven_at_scale":
+                creator_query = creator_query.filter(
+                    CreatorModel.subscriber_count >= 100000,
+                    CreatorModel.subscriber_count <= 1000000
+                )
         
         creators = creator_query.all()
         all_outliers = []
@@ -257,6 +272,7 @@ def calculate_all_outliers(
                     "channel_id": creator.channel_id,
                     "channel_name": creator.name,
                     "channel_avatar": creator.avatar_url,
+                    "subscriber_count": creator.subscriber_count or 0,
                 }
                 all_outliers.append(video_item)
 
@@ -268,12 +284,39 @@ def calculate_all_outliers(
                 if s_query in item["title"].lower() or s_query in item["channel_name"].lower()
             ]
 
-        # Apply min_outlier filter
-        if min_outlier is not None:
+        # Apply Preset Filters
+        if preset:
+            p = preset.lower()
+            if p == "breakouts":
+                all_outliers = [
+                    item for item in all_outliers
+                    if item.get("subscriber_count", 0) <= 50000 and item["score"] >= 5.0 and item["age_in_days"] <= 180
+                ]
+            elif p == "hidden_gems":
+                all_outliers = [
+                    item for item in all_outliers
+                    if item.get("subscriber_count", 0) <= 20000 and item["score"] >= 10.0
+                ]
+            elif p == "proven_at_scale":
+                all_outliers = [
+                    item for item in all_outliers
+                    if 100000 <= item.get("subscriber_count", 0) <= 1000000 and item["score"] >= 2.0
+                ]
+            elif p == "viral_now":
+                all_outliers = [
+                    item for item in all_outliers
+                    if item["age_in_days"] <= 30 and item["score"] >= 3.0 and ((item.get("view_count") or 0) >= 50000 or (item.get("like_count") or 0) >= 500)
+                ]
+            elif p == "all_time_greats":
+                # All-time greats doesn't enforce time_range cutoff
+                time_range = "all"
+
+        # Apply min_outlier filter (only if preset is not set or if specified)
+        if min_outlier is not None and not preset:
             all_outliers = [item for item in all_outliers if item["score"] >= min_outlier]
 
         # Apply time_range cutoff
-        if time_range and time_range != "all":
+        if time_range and time_range != "all" and not (preset and preset.lower() == "all_time_greats"):
             days_cutoff = None
             if time_range == "weekly":
                 days_cutoff = 7
