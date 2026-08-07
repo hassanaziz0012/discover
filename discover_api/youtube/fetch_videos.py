@@ -16,7 +16,7 @@ from typing import Optional, Union, Tuple, List
 from dotenv import load_dotenv
 
 from .models import Video
-from .utils import get_youtube_client, resolve_channel_id
+from .utils import get_youtube_client, resolve_channel_id, format_iso8601_duration
 
 # Configure standard logger
 logger = logging.getLogger("discover_api.youtube.fetch_videos")
@@ -263,95 +263,173 @@ def fetch_video_details(youtube, video_ids: list[str]) -> list[Video]:
     return videos
 
 
+from sqlalchemy.orm import Session
+from db.session import SessionLocal
+from db.models import Creator as CreatorModel, Video as VideoModel
+from datetime import timezone
+
+def db_to_video(v: VideoModel, channel_title: str = "") -> Video:
+    """Convert SQLAlchemy VideoModel record to domain Video object."""
+    c_title = channel_title
+    if not c_title and v.creator:
+        c_title = v.creator.name
+    return Video(
+        video_id=v.video_id,
+        title=v.title or "",
+        description=v.description or "",
+        published_at=v.published_at,
+        thumbnail_url=v.thumbnail_url or "",
+        channel_id=v.channel_id,
+        channel_title=c_title or "Unknown Creator",
+        view_count=v.view_count,
+        like_count=v.like_count,
+        comment_count=v.comment_count,
+        duration=format_iso8601_duration(v.duration),
+        tags=v.tags or [],
+        category_id=v.category_id,
+        live_broadcast=v.live_broadcast,
+        is_short=v.is_short or False,
+        url=v.url or f"https://www.youtube.com/watch?v={v.video_id}"
+    )
+
+
 # ── Core Pipeline ─────────────────────────────────────────────────────────────
 
-def fetch_channel_videos(api_key: str, channel_id: str, fresh: bool = False, return_detailed: bool = False) -> Union[Tuple[List[Video], int, int], List[Video]]:
+def fetch_channel_videos(
+    api_key: str,
+    channel_id: str,
+    fresh: bool = False,
+    return_detailed: bool = False,
+    db: Optional[Session] = None
+) -> Union[Tuple[List[Video], int, int], List[Video]]:
     """
-    Full pipeline with caching: authenticate → find uploads playlist
-    → check cache for channel_id → page uploads playlist (stopping early if hit cache)
-    → enrich new video IDs with stats → merge and return all Video objects.
+    Full pipeline with database persistence:
+    Query existing videos from PostgreSQL → page uploads playlist from API if needed
+    → enrich new video IDs → bulk upsert to PostgreSQL → return Video objects.
     """
-    # 1. Establish and sanitize cache path (to prevent directory traversal)
-    cache_dir = Path(__file__).resolve().parent / "cache"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    
-    safe_channel_id = Path(channel_id).name
-    cache_file = (cache_dir / f"{safe_channel_id}.json").resolve()
-    
-    # Boundary confinement check (fail closed)
-    if not str(cache_file).startswith(str(cache_dir.resolve()) + os.sep):
-        raise ValueError(f"Unsafe channel ID provided: {channel_id}")
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
 
-    # 2. Try loading cached videos
-    cached_videos = []
-    cached_ids = set()
-    
-    if not fresh and cache_file.exists():
-        try:
-            with open(cache_file, "r", encoding="utf-8") as f:
-                cached_data = json.load(f)
-                if isinstance(cached_data, list):
-                    cached_videos = [dict_to_video(v_dict) for v_dict in cached_data]
-                    cached_ids = {v.video_id for v in cached_videos}
-                    logger.info(f"      Fetched {len(cached_videos)} videos from cache")
-        except Exception as e:
-            # Handle corrupt/invalid cache gracefully
-            logger.warning(f"      Warning: Failed to load cache from {cache_file.name} ({e}). Falling back to API.")
-
-    youtube = get_youtube_client(api_key)
-
-    logger.info(f"[1/3] Fetching uploads playlist for channel: {channel_id}")
-    uploads_playlist_id = get_uploads_playlist_id(youtube, channel_id)
-
-    # 3. Fetch video IDs from API, stopping early if we encounter a cached ID
-    logger.info(f"[2/3] Collecting new video IDs from playlist: {uploads_playlist_id}")
-    if fresh:
-        logger.info("      Bypassing cache (--fresh requested)...")
-    
-    new_video_ids, hit_cache = fetch_all_video_ids(
-        youtube, 
-        uploads_playlist_id, 
-        cached_ids=cached_ids if not fresh else None
-    )
-    
-    if hit_cache:
-        logger.info(f"      Found cached video ID. Stopping API fetch.")
-    
-    logger.info(f"      Found {len(new_video_ids)} new videos to fetch from API")
-
-    # 4. Fetch details for new videos from API
-    new_videos = []
-    if new_video_ids:
-        logger.info("[3/3] Fetching full metadata and statistics for new videos …")
-        new_videos = fetch_video_details(youtube, new_video_ids)
-        logger.info(f"      Fetched {len(new_videos)} videos from API")
-
-    # 5. Merge new videos and cached videos
-    # Make sure we don't have duplicates, keeping the fresh/new versions if any conflicts occur.
-    all_videos_dict = {v.video_id: v for v in cached_videos}
-    for v in new_videos:
-        all_videos_dict[v.video_id] = v
-        
-    all_videos = list(all_videos_dict.values())
-
-    # Sort newest → oldest by default
-    all_videos.sort(key=lambda v: v.published_at, reverse=True)
-
-    # 6. Save updated video list to JSON cache
     try:
-        serialized_videos = [video_to_dict(v) for v in all_videos]
-        ensure_shorts_classification(serialized_videos)
-        for v, sv in zip(all_videos, serialized_videos):
-            v.is_short = sv.get("is_short")
-            
-        with open(cache_file, "w", encoding="utf-8") as f:
-            json.dump(serialized_videos, f, indent=2, ensure_ascii=False)
-        
-        logger.info(f"      Saved {len(all_videos)} videos to cache: {cache_file.name}")
-    except Exception as e:
-        logger.warning(f"      Warning: Failed to save cache to {cache_file.name} ({e})")
+        # 1. Query cached videos from PostgreSQL
+        db_videos = db.query(VideoModel).filter(VideoModel.channel_id == channel_id).order_by(VideoModel.published_at.desc()).all()
+        creator_record = db.query(CreatorModel).filter(CreatorModel.channel_id == channel_id).first()
+        channel_title = creator_record.name if creator_record else ""
 
-    logger.info(f"Done! Returning {len(all_videos)} Video objects.")
-    if return_detailed:
-        return all_videos, len(new_videos), len(cached_videos)
-    return all_videos
+        cached_videos = [db_to_video(v, channel_title) for v in db_videos] if not fresh else []
+        cached_ids = {v.video_id for v in cached_videos}
+        
+        if cached_videos:
+            logger.info(f"      Fetched {len(cached_videos)} videos from PostgreSQL database")
+
+        youtube = get_youtube_client(api_key)
+
+        logger.info(f"[1/3] Fetching uploads playlist for channel: {channel_id}")
+        uploads_playlist_id = get_uploads_playlist_id(youtube, channel_id)
+
+        # 2. Fetch video IDs from API, stopping early if we encounter a cached ID
+        logger.info(f"[2/3] Collecting new video IDs from playlist: {uploads_playlist_id}")
+        if fresh:
+            logger.info("      Bypassing cached data (--fresh requested)...")
+        
+        new_video_ids, hit_cache = fetch_all_video_ids(
+            youtube, 
+            uploads_playlist_id, 
+            cached_ids=cached_ids if not fresh else None
+        )
+        
+        if hit_cache:
+            logger.info("      Found cached video ID in database. Stopping API fetch.")
+        
+        logger.info(f"      Found {len(new_video_ids)} new videos to fetch from API")
+
+        # 3. Fetch details for new videos from API
+        new_videos = []
+        if new_video_ids:
+            logger.info("[3/3] Fetching full metadata and statistics for new videos …")
+            new_videos = fetch_video_details(youtube, new_video_ids)
+            logger.info(f"      Fetched {len(new_videos)} videos from API")
+
+        # 4. Save/Upsert new videos to PostgreSQL database
+        if new_videos:
+            # Ensure creator record exists
+            if not creator_record:
+                creator_name = new_videos[0].channel_title or "Unknown Channel"
+                creator_record = CreatorModel(
+                    channel_id=channel_id,
+                    name=creator_name,
+                    subscriber_count=0,
+                    video_count=0,
+                    last_synced_at=datetime.now(timezone.utc)
+                )
+                db.add(creator_record)
+                db.flush()
+                channel_title = creator_name
+
+            serialized_new = [video_to_dict(v) for v in new_videos]
+            ensure_shorts_classification(serialized_new)
+            for v, sv in zip(new_videos, serialized_new):
+                v.is_short = sv.get("is_short")
+
+            from .utils import parse_iso8601_duration
+            for v in new_videos:
+                dur_sec = parse_iso8601_duration(v.duration) or 0
+                existing_v = db.query(VideoModel).filter(VideoModel.video_id == v.video_id).first()
+                if existing_v:
+                    existing_v.title = v.title
+                    existing_v.description = v.description
+                    existing_v.published_at = v.published_at
+                    existing_v.thumbnail_url = v.thumbnail_url
+                    existing_v.view_count = v.view_count or 0
+                    existing_v.like_count = v.like_count or 0
+                    existing_v.comment_count = v.comment_count or 0
+                    existing_v.duration = dur_sec
+                    existing_v.is_short = v.is_short or False
+                    existing_v.category_id = v.category_id
+                    existing_v.live_broadcast = v.live_broadcast
+                    existing_v.tags = v.tags
+                    existing_v.url = v.url or f"https://www.youtube.com/watch?v={v.video_id}"
+                    existing_v.updated_at = datetime.now(timezone.utc)
+                else:
+                    new_v_record = VideoModel(
+                        video_id=v.video_id,
+                        channel_id=channel_id,
+                        title=v.title,
+                        description=v.description,
+                        published_at=v.published_at,
+                        thumbnail_url=v.thumbnail_url,
+                        view_count=v.view_count or 0,
+                        like_count=v.like_count or 0,
+                        comment_count=v.comment_count or 0,
+                        duration=dur_sec,
+                        is_short=v.is_short or False,
+                        category_id=v.category_id,
+                        live_broadcast=v.live_broadcast,
+                        tags=v.tags,
+                        url=v.url or f"https://www.youtube.com/watch?v={v.video_id}",
+                        created_at=datetime.now(timezone.utc),
+                        updated_at=datetime.now(timezone.utc)
+                    )
+                    db.add(new_v_record)
+
+            if creator_record:
+                creator_record.video_count = db.query(VideoModel).filter(VideoModel.channel_id == channel_id).count()
+                creator_record.last_synced_at = datetime.now(timezone.utc)
+            db.commit()
+            logger.info(f"      Saved {len(new_videos)} videos to PostgreSQL database")
+
+        # 5. Query complete list of videos from database for final return
+        db_all_videos = db.query(VideoModel).filter(VideoModel.channel_id == channel_id).order_by(VideoModel.published_at.desc()).all()
+        all_videos = [db_to_video(v, channel_title) for v in db_all_videos]
+
+        logger.info(f"Done! Returning {len(all_videos)} Video objects from PostgreSQL.")
+        if return_detailed:
+            return all_videos, len(new_videos), len(cached_videos)
+        return all_videos
+
+    finally:
+        if close_db:
+            db.close()
+

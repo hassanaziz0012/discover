@@ -9,7 +9,7 @@ import os
 import logging
 from typing import Optional, Dict, Any, List
 
-from .utils import get_youtube_client, parse_iso8601_duration
+from .utils import get_youtube_client, parse_iso8601_duration, format_iso8601_duration
 from .fetch_videos import _best_thumbnail, _parse_dt, ensure_shorts_classification
 
 logger = logging.getLogger("discover_api.youtube.search_live_videos")
@@ -134,7 +134,7 @@ def search_live_videos(
             "view_count": view_cnt,
             "like_count": like_cnt,
             "comment_count": comment_cnt,
-            "duration": duration_str,
+            "duration": format_iso8601_duration(duration_str),
             "url": f"https://www.youtube.com/watch?v={vid_id}",
             "channel_id": ch_id,
             "channel_name": snippet.get("channelTitle", "YouTube Creator"),

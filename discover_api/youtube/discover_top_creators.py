@@ -178,19 +178,18 @@ def discover_top_creators(
         except Exception as e:
             logger.warning(f"Failed to fetch channel metadata batch: {e}")
 
-    # ── Step 3: Check which channels are already cached locally ───────────
-    cached_ids = set()
-    if cache_dir.exists():
-        for file in cache_dir.glob("UC*.json"):
-            name = file.stem
-            if len(name) == 24 and name.startswith("UC") and all(
-                c.isalnum() or c in "-_" for c in name
-            ):
-                cached_ids.add(name)
+    # ── Step 3: Check which channels are already stored in PostgreSQL DB ──
+    from db.session import SessionLocal
+    from db.models import Creator as CreatorModel
 
-    for cid in creators:
-        if cid in cached_ids:
-            creators[cid]["already_cached"] = True
+    db = SessionLocal()
+    try:
+        db_creator_ids = {c.channel_id for c in db.query(CreatorModel.channel_id).all()}
+        for cid in creators:
+            if cid in db_creator_ids:
+                creators[cid]["already_cached"] = True
+    finally:
+        db.close()
 
     # ── Step 4: Sort by subscriber count descending ───────────────────────
     result = sorted(
@@ -200,3 +199,4 @@ def discover_top_creators(
     )
 
     return result
+

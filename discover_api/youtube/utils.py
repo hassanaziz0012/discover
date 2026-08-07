@@ -10,7 +10,7 @@ import os
 import re
 import sys
 from datetime import UTC, datetime
-from typing import Optional
+from typing import Optional, Union
 
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
@@ -155,22 +155,45 @@ def overlap_score(left: set[str], right: set[str]) -> float:
 
 # ── Heuristic / Similarity Scoring Functions ────────────────────────────────────
 
-def parse_iso8601_duration(value: Optional[str]) -> Optional[int]:
-    """Parse an ISO 8601 duration string (e.g. PT4M13S) to total seconds."""
-    if not value:
+def parse_iso8601_duration(value: Optional[Union[str, int, float]]) -> Optional[int]:
+    """Parse an ISO 8601 duration string (e.g. PT4M13S) or seconds integer to total seconds."""
+    if value is None:
         return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        if value.isdigit():
+            return int(value)
+        match = re.fullmatch(
+            r"PT(?:(?P<hours>\d+)H)?(?:(?P<minutes>\d+)M)?(?:(?P<seconds>\d+)S)?",
+            value,
+        )
+        if match:
+            hours = int(match.group("hours") or 0)
+            minutes = int(match.group("minutes") or 0)
+            seconds = int(match.group("seconds") or 0)
+            return hours * 3600 + minutes * 60 + seconds
+    return None
 
-    match = re.fullmatch(
-        r"PT(?:(?P<hours>\d+)H)?(?:(?P<minutes>\d+)M)?(?:(?P<seconds>\d+)S)?",
-        value,
-    )
-    if not match:
-        return None
 
-    hours = int(match.group("hours") or 0)
-    minutes = int(match.group("minutes") or 0)
-    seconds = int(match.group("seconds") or 0)
-    return hours * 3600 + minutes * 60 + seconds
+def format_iso8601_duration(seconds: Optional[Union[int, float, str]]) -> str:
+    """Convert total seconds or duration value into standard ISO 8601 format (e.g. PT42M11S, PT1H2M3S)."""
+    total_seconds = parse_iso8601_duration(seconds)
+    if total_seconds is None or total_seconds <= 0:
+        return "PT0S"
+
+    hrs = total_seconds // 3600
+    mins = (total_seconds % 3600) // 60
+    secs = total_seconds % 60
+
+    res = "PT"
+    if hrs > 0:
+        res += f"{hrs}H"
+    if mins > 0:
+        res += f"{mins}M"
+    if secs > 0 or (hrs == 0 and mins == 0):
+        res += f"{secs}S"
+    return res
 
 
 def duration_similarity(left_seconds: Optional[int], right_seconds: Optional[int]) -> float:

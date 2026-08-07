@@ -16,69 +16,68 @@ from typing import Optional, List, Dict
 logger = logging.getLogger("discover_api.youtube.sentiment_analyzer")
 
 
-def get_sentiment_cache_file_path() -> Path:
-    """
-    Get the path to the sentiment_analysis.json cache file.
-    """
-    return Path(__file__).parent / "cache" / "sentiment_analysis.json"
+from sqlalchemy.orm import Session
+from db.session import SessionLocal
+from db.models import SentimentAnalysis as SentimentAnalysisModel
 
 
-def save_sentiment_analysis_to_cache(video_id: str, model: str, limit: int, report: Dict) -> None:
+def save_sentiment_analysis_to_db(video_id: str, model: str, limit: int, report: Dict, db: Optional[Session] = None) -> None:
     """
-    Append a sentiment analysis report to the sentiment_analysis.json cache file.
+    Save a sentiment analysis report to the PostgreSQL database.
     """
-    cache_file = get_sentiment_cache_file_path()
-    
-    # Ensure parent directory exists
-    cache_file.parent.mkdir(parents=True, exist_ok=True)
-    
-    analyses = []
-    if cache_file.exists():
-        try:
-            with open(cache_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, list):
-                    analyses = data
-        except Exception as e:
-            logger.error(f"Failed to read sentiment cache file: {e}")
-            
-    # Prepare the new entry
-    new_entry = {
-        "video_id": video_id,
-        "model": model,
-        "limit": limit,
-        "created_at": datetime.now(UTC).isoformat(),
-        "report": report
-    }
-    analyses.append(new_entry)
-    
-    # Save back to file
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
+
     try:
-        with open(cache_file, "w", encoding="utf-8") as f:
-            json.dump(analyses, f, indent=2, ensure_ascii=False)
-        logger.info(f"Successfully saved sentiment analysis for video {video_id} to cache.")
+        entry = SentimentAnalysisModel(
+            video_id=video_id,
+            model=model,
+            limit=limit,
+            created_at=datetime.now(UTC),
+            report=report
+        )
+        db.add(entry)
+        db.commit()
+        logger.info(f"Successfully saved sentiment analysis for video {video_id} to database.")
     except Exception as e:
-        logger.error(f"Failed to write sentiment cache file: {e}")
+        db.rollback()
+        logger.error(f"Failed to save sentiment analysis to database: {e}")
+    finally:
+        if close_db:
+            db.close()
 
 
-def get_cached_sentiment_analyses(video_id: str) -> List[Dict]:
+def get_sentiment_analyses(video_id: str, db: Optional[Session] = None) -> List[Dict]:
     """
-    Retrieve all cached sentiment analyses for a given video ID.
+    Retrieve all sentiment analyses for a given video ID from the PostgreSQL database.
     """
-    cache_file = get_sentiment_cache_file_path()
-    if not cache_file.exists():
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
+
+    try:
+        records = db.query(SentimentAnalysisModel).filter(SentimentAnalysisModel.video_id == video_id).order_by(SentimentAnalysisModel.created_at.desc()).all()
+        results = []
+        for r in records:
+            results.append({
+                "id": r.id,
+                "video_id": r.video_id,
+                "model": r.model,
+                "limit": r.limit,
+                "created_at": r.created_at.isoformat() if r.created_at else "",
+                "report": r.report
+            })
+        return results
+    except Exception as e:
+        logger.error(f"Failed to query sentiment analyses from database: {e}")
         return []
-        
-    try:
-        with open(cache_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if isinstance(data, list):
-                # Filter by video_id
-                return [entry for entry in data if entry.get("video_id") == video_id]
-    except Exception as e:
-        logger.error(f"Failed to read sentiment cache file: {e}")
-        
-    return []
+    finally:
+        if close_db:
+            db.close()
+
 
 SYSTEM_PROMPT = """You are an expert data analyst. Analyze the sentiment of the following YouTube video comments.
 
@@ -369,10 +368,11 @@ Comments:
         "analyses": aggregated_results
     }
 
-    # Save report to cache
-    save_sentiment_analysis_to_cache(video_id, model, limit, report)
+    # Save report to database
+    save_sentiment_analysis_to_db(video_id, model, limit, report)
 
     return report
+
 
 
 

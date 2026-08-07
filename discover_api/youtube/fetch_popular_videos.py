@@ -13,7 +13,7 @@ from typing import Optional, Any
 
 from .models import Video
 from .fetch_videos import fetch_video_details, get_uploads_playlist_id
-from .utils import resolve_channel_id, get_youtube_client
+from .utils import resolve_channel_id, get_youtube_client, format_iso8601_duration
 
 logger = logging.getLogger("discover_api.youtube.fetch_popular_videos")
 
@@ -133,7 +133,7 @@ def get_popular_videos(
             "view_count": v.view_count,
             "like_count": v.like_count,
             "comment_count": v.comment_count,
-            "duration": v.duration,
+            "duration": format_iso8601_duration(v.duration),
         }
         for index, v in enumerate(top_videos, start=1)
     ]

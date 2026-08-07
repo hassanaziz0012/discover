@@ -13,7 +13,7 @@ from typing import Optional
 
 from .models import Video
 from .fetch_videos import fetch_channel_videos
-from .utils import resolve_channel_id, get_youtube_client
+from .utils import resolve_channel_id, get_youtube_client, format_iso8601_duration
 
 logger = logging.getLogger("discover_api.youtube.fetch_outliers")
 
@@ -121,7 +121,7 @@ def calculate_outliers(
             "view_count": v.view_count,
             "like_count": v.like_count,
             "comment_count": v.comment_count,
-            "duration": v.duration,
+            "duration": format_iso8601_duration(v.duration),
             "url": v.url,
             "score": round(score, 4),
             "base_score": round(base_score, 4),
@@ -156,7 +156,9 @@ def calculate_outliers(
     }
 
 
-def calculate_all_cached_outliers(
+from sqlalchemy.orm import Session
+
+def calculate_all_outliers(
     days: Optional[float] = None,
     search: Optional[str] = None,
     min_outlier: Optional[float] = None,
@@ -164,181 +166,138 @@ def calculate_all_cached_outliers(
     sort_by: str = "outlierScore",
     exclude_shorts: bool = False,
     list_id: Optional[str] = None,
+    db: Optional[Session] = None,
 ) -> list:
     """
-    Scans the cached creators, calculates outlier scores for all of them completely offline,
-    aggregates, filters by query params (search query, min outlier score, publication timeframe cutoff),
-    and sorts based on views, date, or outlier score.
+    Retrieves aggregated outliers from PostgreSQL database,
+    applying sorting, filtering, and scoring.
     """
-    import json
-    from pathlib import Path
-    from .cached_creators import get_cached_creators, cache_dir
-    from .fetch_videos import dict_to_video
+    from db.session import SessionLocal
+    from db.models import Creator as CreatorModel, Video as VideoModel, UserList, ListCreator
 
-    creators = get_cached_creators()
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
 
-    if list_id:
-        lists_file = cache_dir / "lists.json"
-        if lists_file.exists():
-            try:
-                with open(lists_file, "r", encoding="utf-8") as f:
-                    lists_data = json.load(f)
-                for l in lists_data:
-                    if l.get("id") == list_id or l.get("name") == list_id:
-                        target_channels = set(l.get("channels", []))
-                        creators = [c for c in creators if c.get("channel_id") in target_channels]
-                        break
-                else:
-                    # List ID or name specified but not found
-                    creators = []
-            except Exception as e:
-                logger.warning(f"Failed to read lists file: {e}")
+    try:
+        # Determine channel filtering if list_id is provided
+        target_channel_ids = None
+        if list_id:
+            user_list = db.query(UserList).filter((UserList.id == list_id) | (UserList.name == list_id)).first()
+            if user_list:
+                target_channel_ids = {lc.channel_id for lc in user_list.creators}
+            else:
+                return []
 
-    all_outliers = []
-    now = datetime.now(timezone.utc)
+        # Query creators
+        creator_query = db.query(CreatorModel)
+        if target_channel_ids is not None:
+            creator_query = creator_query.filter(CreatorModel.channel_id.in_(target_channel_ids))
+        
+        creators = creator_query.all()
+        all_outliers = []
+        now = datetime.now(timezone.utc)
 
-    for creator in creators:
-        channel_id = creator.get("channel_id")
-        channel_name = creator.get("name", "Unknown Creator")
-        channel_avatar = creator.get("thumbnail_url")
-
-        if not channel_id:
-            continue
-
-        # Resolve path safely to prevent directory traversal
-        safe_channel_id = Path(channel_id).name
-        cache_file = (cache_dir / f"{safe_channel_id}.json").resolve()
-
-        # Strict boundary confinement check
-        if not str(cache_file).startswith(str(cache_dir.resolve()) + os.sep):
-            logger.warning(f"Warning: Directory traversal blocked for channel ID: {channel_id}")
-            continue
-
-        if not cache_file.exists():
-            continue
-
-        try:
-            with open(cache_file, "r", encoding="utf-8") as f:
-                videos_data = json.load(f)
-        except Exception as e:
-            logger.warning(f"Failed to read cache file {cache_file.name}: {e}")
-            continue
-
-        if not videos_data or not isinstance(videos_data, list):
-            continue
-
-        # On-the-fly migration: classify shorts and write back to cache if updated
-        try:
-            from .fetch_videos import ensure_shorts_classification
-            if ensure_shorts_classification(videos_data):
-                with open(cache_file, "w", encoding="utf-8") as f:
-                    json.dump(videos_data, f, indent=2, ensure_ascii=False)
-                logger.info(f"Successfully migrated and saved shorts classification for {cache_file.name}")
-        except Exception as e:
-            logger.warning(f"Failed to write migrated cache back to {cache_file.name}: {e}")
-
-        videos = []
-        for v_dict in videos_data:
-            try:
-                videos.append(dict_to_video(v_dict))
-            except Exception as e:
-                # Skip individual malformed videos
+        for creator in creators:
+            videos = creator.videos
+            if not videos:
                 continue
 
-        if not videos:
-            continue
+            valid_views_videos = [v for v in videos if v.view_count is not None]
+            valid_likes_videos = [v for v in videos if v.like_count is not None]
 
-        valid_views_videos = [v for v in videos if v.view_count is not None]
-        valid_likes_videos = [v for v in videos if v.like_count is not None]
+            avg_views = sum(v.view_count for v in valid_views_videos) / len(valid_views_videos) if valid_views_videos else 0.0
+            avg_likes = sum(v.like_count for v in valid_likes_videos) / len(valid_likes_videos) if valid_likes_videos else 0.0
 
-        avg_views = sum(v.view_count for v in valid_views_videos) / len(valid_views_videos) if valid_views_videos else 0.0
-        avg_likes = sum(v.like_count for v in valid_likes_videos) / len(valid_likes_videos) if valid_likes_videos else 0.0
+            for v in videos:
+                if exclude_shorts and v.is_short:
+                    continue
 
-        for v in videos:
-            if exclude_shorts and v.is_short:
-                continue
+                view_ratio = v.view_count / avg_views if (v.view_count is not None and avg_views > 0) else 0.0
+                like_ratio = v.like_count / avg_likes if (v.like_count is not None and avg_likes > 0) else 0.0
 
-            # Calculate ratios
-            view_ratio = v.view_count / avg_views if (v.view_count is not None and avg_views > 0) else 0.0
-            like_ratio = v.like_count / avg_likes if (v.like_count is not None and avg_likes > 0) else 0.0
+                ratios = []
+                if v.view_count is not None and avg_views > 0:
+                    ratios.append(view_ratio)
+                if v.like_count is not None and avg_likes > 0:
+                    ratios.append(like_ratio)
 
-            ratios = []
-            if v.view_count is not None and avg_views > 0:
-                ratios.append(view_ratio)
-            if v.like_count is not None and avg_likes > 0:
-                ratios.append(like_ratio)
+                base_score = sum(ratios) / len(ratios) if ratios else 0.0
 
-            base_score = sum(ratios) / len(ratios) if ratios else 0.0
+                is_boosted = False
+                age_in_days = (now - v.published_at).total_seconds() / 86400.0
 
-            is_boosted = False
-            age_in_days = (now - v.published_at).total_seconds() / 86400.0
+                score = base_score
+                if days is not None:
+                    if age_in_days <= days:
+                        score = base_score * 1.10
+                        is_boosted = True
 
-            score = base_score
-            if days is not None:
-                if age_in_days <= days:
-                    score = base_score * 1.10
-                    is_boosted = True
+                video_item = {
+                    "video_id": v.video_id,
+                    "title": v.title,
+                    "description": v.description or "",
+                    "published_at": v.published_at.isoformat(),
+                    "thumbnail_url": v.thumbnail_url or "",
+                    "view_count": v.view_count,
+                    "like_count": v.like_count,
+                    "comment_count": v.comment_count,
+                    "duration": format_iso8601_duration(v.duration),
+                    "url": v.url or f"https://www.youtube.com/watch?v={v.video_id}",
+                    "score": round(score, 4),
+                    "base_score": round(base_score, 4),
+                    "view_ratio": round(view_ratio, 4),
+                    "like_ratio": round(like_ratio, 4),
+                    "view_diff": int(v.view_count - avg_views) if v.view_count is not None else 0,
+                    "like_diff": int(v.like_count - avg_likes) if v.like_count is not None else 0,
+                    "age_in_days": round(age_in_days, 2),
+                    "is_boosted": is_boosted,
+                    "is_short": v.is_short,
+                    "channel_id": creator.channel_id,
+                    "channel_name": creator.name,
+                    "channel_avatar": creator.avatar_url,
+                }
+                all_outliers.append(video_item)
 
-            video_item = {
-                "video_id": v.video_id,
-                "title": v.title,
-                "description": v.description,
-                "published_at": v.published_at.isoformat(),
-                "thumbnail_url": v.thumbnail_url,
-                "view_count": v.view_count,
-                "like_count": v.like_count,
-                "comment_count": v.comment_count,
-                "duration": v.duration,
-                "url": v.url,
-                "score": round(score, 4),
-                "base_score": round(base_score, 4),
-                "view_ratio": round(view_ratio, 4),
-                "like_ratio": round(like_ratio, 4),
-                "view_diff": int(v.view_count - avg_views) if v.view_count is not None else 0,
-                "like_diff": int(v.like_count - avg_likes) if v.like_count is not None else 0,
-                "age_in_days": round(age_in_days, 2),
-                "is_boosted": is_boosted,
-                "is_short": v.is_short,
-                "channel_id": channel_id,
-                "channel_name": channel_name,
-                "channel_avatar": channel_avatar,
-            }
-            all_outliers.append(video_item)
+        # Apply search filter
+        if search:
+            s_query = search.lower().strip()
+            all_outliers = [
+                item for item in all_outliers
+                if s_query in item["title"].lower() or s_query in item["channel_name"].lower()
+            ]
 
-    # Apply search filter
-    if search:
-        s_query = search.lower().strip()
-        all_outliers = [
-            item for item in all_outliers
-            if s_query in item["title"].lower() or s_query in item["channel_name"].lower()
-        ]
+        # Apply min_outlier filter
+        if min_outlier is not None:
+            all_outliers = [item for item in all_outliers if item["score"] >= min_outlier]
 
-    # Apply min_outlier filter
-    if min_outlier is not None:
-        all_outliers = [item for item in all_outliers if item["score"] >= min_outlier]
+        # Apply time_range cutoff
+        if time_range and time_range != "all":
+            days_cutoff = None
+            if time_range == "weekly":
+                days_cutoff = 7
+            elif time_range == "monthly":
+                days_cutoff = 30
+            elif time_range == "3months":
+                days_cutoff = 90
+            elif time_range == "6months":
+                days_cutoff = 180
 
-    # Apply time_range cutoff
-    if time_range and time_range != "all":
-        days_cutoff = None
-        if time_range == "weekly":
-            days_cutoff = 7
-        elif time_range == "monthly":
-            days_cutoff = 30
-        elif time_range == "3months":
-            days_cutoff = 90
-        elif time_range == "6months":
-            days_cutoff = 180
+            if days_cutoff is not None:
+                all_outliers = [item for item in all_outliers if item["age_in_days"] <= days_cutoff]
 
-        if days_cutoff is not None:
-            all_outliers = [item for item in all_outliers if item["age_in_days"] <= days_cutoff]
+        # Apply Sort
+        if sort_by == "views":
+            all_outliers.sort(key=lambda x: x["view_count"] if x["view_count"] is not None else 0, reverse=True)
+        elif sort_by == "newest":
+            all_outliers.sort(key=lambda x: x["published_at"], reverse=True)
+        else:  # default outlierScore / score
+            all_outliers.sort(key=lambda x: x["score"], reverse=True)
 
-    # Apply Sort
-    if sort_by == "views":
-        all_outliers.sort(key=lambda x: x["view_count"] if x["view_count"] is not None else 0, reverse=True)
-    elif sort_by == "newest":
-        all_outliers.sort(key=lambda x: x["published_at"], reverse=True)
-    else:  # default outlierScore / score
-        all_outliers.sort(key=lambda x: x["score"], reverse=True)
+        return all_outliers
+    finally:
+        if close_db:
+            db.close()
 
-    return all_outliers
 
