@@ -1,0 +1,85 @@
+services:
+  # ---------------------------------------------------------------------------
+  # 1. PostgreSQL Database Service
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:18.4-alpine
+    container_name: discover-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: discover_db
+      POSTGRES_USER: discover_user
+      POSTGRES_PASSWORD: discover_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - discover_postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U discover_user -d discover_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - discover-network
+
+  # ---------------------------------------------------------------------------
+  # 2. FastAPI Backend API Service
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./discover_api
+      dockerfile: Dockerfile
+    container_name: discover-backend
+    restart: unless-stopped
+    env_file:
+      - ./discover_api/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://discover_user:discover_password@db:5432/discover_db
+      ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - discover-network
+
+  # ---------------------------------------------------------------------------
+  # 3. Next.js Frontend Service
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./discover
+      dockerfile: Dockerfile
+    container_name: discover-frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - discover-network
+
+  # ---------------------------------------------------------------------------
+  # 4. Optional Future Services (e.g. Redis Caching Layer)
+  # Uncomment the block below whenever you want to add Redis caching!
+  # ---------------------------------------------------------------------------
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: discover-redis
+  #   restart: unless-stopped
+  #   ports:
+  #     - "6379:6379"
+  #   networks:
+  #     - discover-network
+
+networks:
+  discover-network:
+    driver: bridge
+
+volumes:
+  # Uses existing external Docker volume to preserve all PostgreSQL data
+  discover_postgres_data:
+    external: true
