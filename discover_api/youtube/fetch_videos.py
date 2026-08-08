@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Optional, Union, Tuple, List
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from googleapiclient.errors import HttpError
+
 from dotenv import load_dotenv
 
 from .models import Video
@@ -172,7 +174,7 @@ def ensure_shorts_classification(videos_data: list, force_recheck: bool = False)
             backoff_factor=0.5,
             status_forcelist=[429, 500, 502, 503, 504],
         )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
+        adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=1, pool_maxsize=20)
         session.mount("https://", adapter)
         
         def check_short_http(video_id: str) -> bool:
@@ -417,6 +419,8 @@ def fetch_channel_videos(
             new_videos = []
             hit_cache = False
             next_page_token = None
+            quota_exceeded = False
+            now = datetime.now(timezone.utc)
 
             def _fetch_batch_ids(batch_ids: list[str]) -> list[Video]:
                 client = _get_thread_youtube_client(api_key)
@@ -451,60 +455,18 @@ def fetch_channel_videos(
                     batch_videos.append(video)
                 return batch_videos
 
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = []
+            def _save_pending(pending: list[Video]) -> None:
+                """
+                Classify Shorts, upsert a batch of Video objects to the DB, and commit.
+                Called incrementally so videos are persisted even if the API quota is hit mid-fetch.
+                """
+                nonlocal creator_record, channel_title
+                if not pending:
+                    return
 
-                while True:
-                    response = youtube.playlistItems().list(
-                        part="contentDetails",
-                        playlistId=uploads_playlist_id,
-                        maxResults=50,
-                        pageToken=next_page_token,
-                    ).execute()
-
-                    items = response.get("items", [])
-                    page_vids = []
-                    for item in items:
-                        vid = item["contentDetails"]["videoId"]
-                        if not fresh and cached_ids and vid in cached_ids:
-                            hit_cache = True
-                            break
-                        page_vids.append(vid)
-                        new_video_ids.append(vid)
-
-                    if page_vids:
-                        futures.append(executor.submit(_fetch_batch_ids, page_vids))
-
-                    if hit_cache:
-                        break
-
-                    if len(new_video_ids) // 500 > (len(new_video_ids) - len(items)) // 500:
-                        milestone = (len(new_video_ids) // 500) * 500
-                        if milestone > 0:
-                            logger.info(f"      Collected {milestone} video IDs (enriching metadata concurrently in background...)")
-
-                    next_page_token = response.get("nextPageToken")
-                    if not next_page_token:
-                        break
-
-                if hit_cache:
-                    logger.info("      Found cached video ID in database. Stopping API fetch.")
-
-                logger.info(f"      Collected {len(new_video_ids)} new video IDs across API pages")
-
-                # Collect detail results as they complete
-                if futures:
-                    logger.info(f"[3/3] Awaiting concurrent metadata enrichment across {len(futures)} batches...")
-                    for f in futures:
-                        new_videos.extend(f.result())
-                    logger.info(f"      Fetched {len(new_videos)} detailed video objects from API")
-
-            # 4. Save/Upsert new videos to PostgreSQL database
-            if new_videos:
-                now = datetime.now(timezone.utc)
-                # Ensure creator record exists
+                # Ensure creator row exists before inserting videos (FK constraint)
                 if not creator_record:
-                    creator_name = new_videos[0].channel_title or "Unknown Channel"
+                    creator_name = pending[0].channel_title or "Unknown Channel"
                     creator_stmt = pg_insert(CreatorModel).values({
                         "channel_id": channel_id,
                         "name": creator_name,
@@ -520,14 +482,14 @@ def fetch_channel_videos(
                     if creator_record:
                         channel_title = creator_record.name
 
-                serialized_new = [video_to_dict(v) for v in new_videos]
-                ensure_shorts_classification(serialized_new)
-                for v, sv in zip(new_videos, serialized_new):
+                from .utils import parse_iso8601_duration
+                serialized = [video_to_dict(v) for v in pending]
+                ensure_shorts_classification(serialized)
+                for v, sv in zip(pending, serialized):
                     v.is_short = sv.get("is_short")
 
-                from .utils import parse_iso8601_duration
                 video_records = []
-                for v in new_videos:
+                for v in pending:
                     dur_sec = parse_iso8601_duration(v.duration) or 0
                     video_records.append({
                         "video_id": v.video_id,
@@ -549,28 +511,117 @@ def fetch_channel_videos(
                         "updated_at": now,
                     })
 
-                if video_records:
-                    batch_size = 1000
-                    for i in range(0, len(video_records), batch_size):
-                        batch = video_records[i : i + batch_size]
-                        stmt = pg_insert(VideoModel).values(batch)
-                        update_cols = {
-                            col.name: col
-                            for col in stmt.excluded
-                            if col.name not in ("video_id", "created_at")
-                        }
-                        upsert_stmt = stmt.on_conflict_do_update(
-                            index_elements=["video_id"],
-                            set_=update_cols
-                        )
-                        db.execute(upsert_stmt)
-
-                if creator_record:
-                    creator_record.video_count = db.query(VideoModel).filter(VideoModel.channel_id == channel_id).count()
-                    creator_record.last_synced_at = now
+                batch_size = 1000
+                for i in range(0, len(video_records), batch_size):
+                    batch = video_records[i : i + batch_size]
+                    stmt = pg_insert(VideoModel).values(batch)
+                    update_cols = {
+                        col.name: col
+                        for col in stmt.excluded
+                        if col.name not in ("video_id", "created_at")
+                    }
+                    upsert_stmt = stmt.on_conflict_do_update(
+                        index_elements=["video_id"],
+                        set_=update_cols
+                    )
+                    db.execute(upsert_stmt)
 
                 db.commit()
-                logger.info(f"      Saved {len(new_videos)} videos to PostgreSQL database")
+                logger.info(f"      Saved {len(pending)} videos to PostgreSQL database")
+
+            # Incremental save threshold: commit to DB every N videos so quota errors don't lose work
+            INCREMENTAL_SAVE_THRESHOLD = 500
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures_list = []
+                pending_videos = []
+
+                # Producer: page through the uploads playlist and submit detail-fetch batches
+                while not quota_exceeded:
+                    try:
+                        response = youtube.playlistItems().list(
+                            part="contentDetails",
+                            playlistId=uploads_playlist_id,
+                            maxResults=50,
+                            pageToken=next_page_token,
+                        ).execute()
+                    except HttpError as e:
+                        if e.resp.status == 403 and b"quotaExceeded" in e.content:
+                            logger.warning(
+                                "YouTube API daily quota exceeded during playlist fetch. "
+                                "Saving all videos fetched so far and stopping."
+                            )
+                            quota_exceeded = True
+                            break
+                        raise
+
+                    items = response.get("items", [])
+                    page_vids = []
+                    for item in items:
+                        vid = item["contentDetails"]["videoId"]
+                        if not fresh and cached_ids and vid in cached_ids:
+                            hit_cache = True
+                            break
+                        page_vids.append(vid)
+                        new_video_ids.append(vid)
+
+                    if page_vids:
+                        futures_list.append(executor.submit(_fetch_batch_ids, page_vids))
+
+                    if hit_cache:
+                        break
+
+                    if len(new_video_ids) // 500 > (len(new_video_ids) - len(items)) // 500:
+                        milestone = (len(new_video_ids) // 500) * 500
+                        if milestone > 0:
+                            logger.info(f"      Collected {milestone} video IDs (enriching metadata concurrently in background...)")
+
+                    next_page_token = response.get("nextPageToken")
+                    if not next_page_token:
+                        break
+
+                if hit_cache:
+                    logger.info("      Found cached video ID in database. Stopping API fetch.")
+                if quota_exceeded:
+                    logger.warning(f"      Stopped at {len(new_video_ids)} video IDs due to API quota limit.")
+
+                logger.info(f"      Collected {len(new_video_ids)} new video IDs across API pages")
+
+                # Consumer: collect futures as they complete and save incrementally
+                if futures_list:
+                    logger.info(f"[3/3] Awaiting concurrent metadata enrichment across {len(futures_list)} batches...")
+                    for future in as_completed(futures_list):
+                        try:
+                            batch = future.result()
+                            new_videos.extend(batch)
+                            pending_videos.extend(batch)
+                        except HttpError as e:
+                            if e.resp.status == 403 and b"quotaExceeded" in e.content:
+                                logger.warning(
+                                    "YouTube API quota exceeded during metadata fetch. "
+                                    "Saving partial results and stopping."
+                                )
+                                quota_exceeded = True
+                                continue
+                            raise
+
+                        # Save to DB every INCREMENTAL_SAVE_THRESHOLD videos so a quota
+                        # error mid-fetch doesn't lose all the work done so far
+                        if len(pending_videos) >= INCREMENTAL_SAVE_THRESHOLD:
+                            _save_pending(pending_videos)
+                            pending_videos = []
+
+                    # Save any remaining videos that didn't fill a full threshold
+                    if pending_videos:
+                        _save_pending(pending_videos)
+
+                    logger.info(f"      Fetched {len(new_videos)} detailed video objects from API")
+
+            # Update creator video count and sync timestamp after all saves
+            if new_videos and creator_record:
+                creator_record.video_count = db.query(VideoModel).filter(VideoModel.channel_id == channel_id).count()
+                creator_record.last_synced_at = now
+                db.commit()
 
             # 5. Query complete list of videos from database for final return
             db_all_videos = db.query(VideoModel).filter(VideoModel.channel_id == channel_id).order_by(VideoModel.published_at.desc()).all()
