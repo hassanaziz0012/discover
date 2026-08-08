@@ -4,6 +4,7 @@ import React from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import VideoGrid from "../../../components/VideoGrid";
+import LoadingFooter from "../../../components/LoadingFooter";
 import { useOutliersData } from "./hooks/useOutliersData";
 import { OutliersHeader } from "./components/OutliersHeader";
 import { OutliersFilters } from "./components/OutliersFilters";
@@ -16,7 +17,9 @@ export default function CreatorOutliersPage() {
   const {
     data,
     isLoading,
+    isLoadingMore,
     error,
+    hasMore,
     daysBoost,
     setDaysBoost,
     limit,
@@ -35,6 +38,7 @@ export default function CreatorOutliersPage() {
     handleResetFilters,
     filteredAndSortedVideos,
   } = useOutliersData(creatorID);
+
 
   return (
     <div className="w-full max-w-[1280px] mx-auto px-4 sm:px-6 min-h-screen flex flex-col py-6">
@@ -120,6 +124,14 @@ export default function CreatorOutliersPage() {
             <VideoGrid
               videos={filteredAndSortedVideos}
               onResetFilters={handleResetFilters}
+            />
+
+            {/* Infinite Scroll Footer */}
+            <LoadingFooter
+              hasMore={hasMore}
+              isLoading={isLoadingMore}
+              loadingText="Loading more outliers..."
+              scrollText="Scroll down to load more outliers..."
             />
           </main>
         </div>

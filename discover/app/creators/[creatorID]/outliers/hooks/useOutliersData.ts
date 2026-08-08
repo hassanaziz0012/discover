@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Video } from "../../../../types/video";
 import { formatViews, formatDuration, timeAgo } from "../../../../utils/format";
 import { API_BASE_URL } from "@/app/utils/constants";
-import { ApiResponse } from "../types";
+import { ApiResponse, ApiOutlier } from "../types";
 
 export interface UseOutliersDataResult {
   data: ApiResponse | null;
   isLoading: boolean;
+  isLoadingMore: boolean;
   error: string | null;
+  hasMore: boolean;
   daysBoost: string;
   setDaysBoost: (val: string) => void;
   limit: string;
@@ -27,11 +29,17 @@ export interface UseOutliersDataResult {
   filteredAndSortedVideos: Video[];
 }
 
+const PER_PAGE = 50;
+
 export function useOutliersData(creatorID: string): UseOutliersDataResult {
   // API State
   const [data, setData] = useState<ApiResponse | null>(null);
+  const [allOutliers, setAllOutliers] = useState<ApiOutlier[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [page, setPage] = useState(1);
 
   // Dynamic Query Parameter States (passed to backend API)
   const [daysBoost, setDaysBoost] = useState<string>("30"); // Recency boost time-frame cutoff (default 30 days)
@@ -51,6 +59,18 @@ export function useOutliersData(creatorID: string): UseOutliersDataResult {
   // Clipboard copy feedback
   const [isCopied, setIsCopied] = useState(false);
 
+  // Ref to prevent concurrent fetches
+  const isFetchingRef = useRef(false);
+  const pageRef = useRef(page);
+  const hasMoreRef = useRef(hasMore);
+  const isLoadingRef = useRef(isLoading || isLoadingMore);
+
+  useEffect(() => {
+    pageRef.current = page;
+    hasMoreRef.current = hasMore;
+    isLoadingRef.current = isLoading || isLoadingMore;
+  });
+
   const handleSetExcludeShorts = (val: boolean) => {
     setExcludeShorts(val);
     if (typeof window !== "undefined") {
@@ -58,21 +78,48 @@ export function useOutliersData(creatorID: string): UseOutliersDataResult {
     }
   };
 
-  // Fetch data function
-  const fetchOutliers = async () => {
+  // Fetch data function — supports both initial load and loading more pages
+  const fetchPage = useCallback(async (pageToFetch: number, isReset: boolean) => {
     if (!creatorID) return;
-    setIsLoading(true);
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+
+    if (isReset) {
+      setIsLoading(true);
+      setPage(1);
+    } else {
+      setIsLoadingMore(true);
+    }
     setError(null);
+
     try {
       const daysQuery = daysBoost ? `&days=${encodeURIComponent(daysBoost)}` : "";
       const limitQuery = limit && limit !== "all" ? `&limit=${encodeURIComponent(limit)}` : "";
       const excludeShortsQuery = excludeShorts ? `&exclude_shorts=true` : "";
       const response = await fetch(
-        `${API_BASE_URL}/api/youtube/fetch-outliers?channel=${encodeURIComponent(creatorID)}${daysQuery}${limitQuery}${excludeShortsQuery}`
+        `${API_BASE_URL}/api/youtube/fetch-outliers?channel=${encodeURIComponent(creatorID)}${daysQuery}${limitQuery}${excludeShortsQuery}&page=${pageToFetch}&per_page=${PER_PAGE}`
       );
       if (response.ok) {
-        const json = await response.json();
+        const json: ApiResponse = await response.json();
+
+        // Store channel-level metadata (always from first page or latest)
         setData(json);
+
+        // Accumulate outliers
+        setAllOutliers((prev) => {
+          if (isReset) return json.outliers;
+          // Deduplicate by video_id
+          const combined = [...prev, ...json.outliers];
+          const seen = new Set<string>();
+          return combined.filter((o) => {
+            if (seen.has(o.video_id)) return false;
+            seen.add(o.video_id);
+            return true;
+          });
+        });
+
+        setHasMore(json.has_more);
+        setPage(pageToFetch);
       } else {
         const errJson = await response.json().catch(() => ({}));
         setError(errJson.detail || `Failed to fetch outliers. Server returned status code ${response.status}.`);
@@ -82,13 +129,48 @@ export function useOutliersData(creatorID: string): UseOutliersDataResult {
       setError("Unable to connect to the backend server. Please verify that the uvicorn server is running on port 8000.");
     } finally {
       setIsLoading(false);
+      setIsLoadingMore(false);
+      isFetchingRef.current = false;
     }
-  };
-
-  // Trigger fetch when dynamic query params change
-  useEffect(() => {
-    fetchOutliers();
   }, [creatorID, daysBoost, limit, excludeShorts]);
+
+  // Public fetchOutliers — always resets to page 1
+  const fetchOutliers = useCallback(async () => {
+    await fetchPage(1, true);
+  }, [fetchPage]);
+
+  // Trigger fresh fetch when dynamic query params change
+  useEffect(() => {
+    fetchPage(1, true);
+  }, [creatorID, daysBoost, limit, excludeShorts]);
+
+  // Infinite Scroll IntersectionObserver
+  useEffect(() => {
+    const sentinel = document.getElementById("scroll-sentinel");
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (
+          entries[0].isIntersecting &&
+          hasMoreRef.current &&
+          !isLoadingRef.current &&
+          !isFetchingRef.current
+        ) {
+          fetchPage(pageRef.current + 1, false);
+        }
+      },
+      {
+        rootMargin: "300px",
+      }
+    );
+
+    observer.observe(sentinel);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [fetchPage]);
 
   // Handle Copy Channel ID
   const handleCopyChannelId = () => {
@@ -108,12 +190,12 @@ export function useOutliersData(creatorID: string): UseOutliersDataResult {
     handleSetExcludeShorts(false);
   };
 
-  // Client-side filtering & sorting pipeline
+  // Client-side filtering & sorting pipeline (operates on accumulated outliers)
   const filteredAndSortedVideos = useMemo(() => {
-    if (!data || !data.outliers) return [];
+    if (!data || !allOutliers.length) return [];
 
     // Map ApiOutlier to standard Video interface
-    let mapped: Video[] = data.outliers.map((o) => ({
+    let mapped: Video[] = allOutliers.map((o) => ({
       id: o.video_id,
       title: o.title,
       creator: data.channel_name,
@@ -157,12 +239,14 @@ export function useOutliersData(creatorID: string): UseOutliersDataResult {
     });
 
     return mapped;
-  }, [data, searchQuery, minOutlier, sortBy, excludeShorts]);
+  }, [data, allOutliers, searchQuery, minOutlier, sortBy, excludeShorts]);
 
   return {
     data,
     isLoading,
+    isLoadingMore,
     error,
+    hasMore,
     daysBoost,
     setDaysBoost,
     limit,
