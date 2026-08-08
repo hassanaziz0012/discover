@@ -111,6 +111,7 @@ export default function Home() {
 
   // Keep track of the last successfully initiated fetch page number to avoid duplicates
   const lastFetchedPage = useRef<number>(0);
+  const isFetchingListsRef = useRef<boolean>(false);
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -237,6 +238,8 @@ export default function Home() {
 
   // Fetch customized lists from backend API
   async function fetchLists() {
+    if (isFetchingListsRef.current) return;
+    isFetchingListsRef.current = true;
     try {
       const response = await fetch(`${API_BASE_URL}/api/youtube/lists`);
       if (response.ok) {
@@ -245,6 +248,8 @@ export default function Home() {
       }
     } catch (err) {
       console.error("Failed to fetch lists:", err);
+    } finally {
+      isFetchingListsRef.current = false;
     }
   }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 import TabNavigation from "@/app/components/TabNavigation";
 import SearchBar from "@/app/components/SearchBar";
 import FilterModal from "@/app/components/FilterModal";
@@ -40,8 +40,12 @@ export default function ThumbnailPreviewPage() {
   const [selectedListId, setSelectedListId] = useState<string>("all");
   const [creators, setCreators] = useState<Creator[]>([]);
 
+  const isFetchingListsRef = useRef(false);
+
   useEffect(() => {
     async function fetchLists() {
+      if (isFetchingListsRef.current) return;
+      isFetchingListsRef.current = true;
       try {
         const response = await fetch(`${API_BASE_URL}/api/youtube/lists`);
         if (response.ok) {
@@ -50,6 +54,8 @@ export default function ThumbnailPreviewPage() {
         }
       } catch (err) {
         console.error("Failed to fetch lists:", err);
+      } finally {
+        isFetchingListsRef.current = false;
       }
     }
 

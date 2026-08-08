@@ -64,6 +64,7 @@ export default function CreatorsPage() {
   const [creatorsError, setCreatorsError] = useState<string | null>(null);
 
   const isFetchingRef = React.useRef(false);
+  const isFetchingListsRef = React.useRef(false);
   const pageRef = React.useRef(page);
   const hasMoreRef = React.useRef(hasMore);
   const isLoadingRef = React.useRef(creatorsLoading || isLoadingMore);
@@ -254,6 +255,8 @@ export default function CreatorsPage() {
 
   // Fetch customized lists from backend API
   async function fetchLists() {
+    if (isFetchingListsRef.current) return;
+    isFetchingListsRef.current = true;
     try {
       const response = await fetch(`${API_BASE_URL}/api/youtube/lists`);
       if (response.ok) {
@@ -262,6 +265,8 @@ export default function CreatorsPage() {
       }
     } catch (err) {
       console.error("Failed to fetch lists:", err);
+    } finally {
+      isFetchingListsRef.current = false;
     }
   }
 
