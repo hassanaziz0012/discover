@@ -125,10 +125,10 @@ export default function Home() {
   // Fetch cached creators from backend API for ListPills reference
   async function fetchCreators() {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/youtube/cached-creators`);
+      const response = await fetch(`${API_BASE_URL}/api/youtube/cached-creators?page=1&limit=200`);
       if (response.ok) {
         const data = await response.json();
-        setCreators(data);
+        setCreators(data.creators || (Array.isArray(data) ? data : []));
       }
     } catch (err) {
       console.error("Fetch creators error:", err);

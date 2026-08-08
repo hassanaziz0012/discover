@@ -95,13 +95,17 @@ async def search_creators(
 
 @router.get("/creators")
 @router.get("/cached-creators")
-async def get_creators_endpoint(db: Session = Depends(get_db)):
+async def get_creators_endpoint(
+    page: int = Query(1, ge=1, description="Page number for pagination"),
+    limit: int = Query(50, ge=1, le=200, description="Items per page"),
+    db: Session = Depends(get_db)
+):
     """
-    Retrieve YouTube channel metadata for all creators currently stored in PostgreSQL.
+    Retrieve YouTube channel metadata for creators stored in PostgreSQL (paginated).
     """
     try:
-        creators = get_creators(db=db)
-        return creators
+        result = get_creators(db=db, page=page, limit=limit)
+        return result
     except Exception as e:
         logger.error(f"Unexpected error in creators endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to fetch creators: {e}")
@@ -147,7 +151,8 @@ async def refresh_creators(db: Session = Depends(get_db)):
         results = await asyncio.gather(*tasks)
 
         # 4. Load updated creators metadata from DB
-        updated_creators = get_creators(db=db)
+        creators_data = get_creators(db=db, page=1, limit=50)
+        updated_creators = creators_data["creators"]
         creators_by_id = {c["channel_id"]: c for c in updated_creators}
 
         refreshed_list = []
@@ -288,7 +293,8 @@ async def sync_subscriptions(
                     })
 
         # Load updated creators
-        updated_creators = get_creators(db=db)
+        creators_data = get_creators(db=db, page=1, limit=50)
+        updated_creators = creators_data["creators"]
 
         status_msg = f"Successfully synced {len(refreshed_list)} subscribed channels."
         if errors:

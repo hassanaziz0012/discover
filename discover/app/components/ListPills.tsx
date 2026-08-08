@@ -7,6 +7,7 @@ export interface ListPillsProps {
   selectedListId: string;
   onSelectListId: (id: string) => void;
   creators: Creator[];
+  totalCreators?: number;
   onManageListClick?: () => void;
 }
 
@@ -15,8 +16,11 @@ export default function ListPills({
   selectedListId,
   onSelectListId,
   creators,
+  totalCreators,
   onManageListClick,
 }: ListPillsProps) {
+  const totalCount = totalCreators !== undefined ? totalCreators : creators.length;
+
   return (
     <div className="flex flex-wrap items-center gap-2 overflow-x-auto pb-1.5 scrollbar-none">
       <button
@@ -27,10 +31,10 @@ export default function ListPills({
             : "bg-surface border-border-subtle text-secondary hover:text-brand hover:border-brand"
         }`}
       >
-        All ({creators.length})
+        All ({totalCount})
       </button>
       {lists.map((list) => {
-        const count = creators.filter((c) => list.channels.includes(c.channel_id)).length;
+        const count = list.channels ? list.channels.length : creators.filter((c) => list.channels.includes(c.channel_id)).length;
         return (
           <button
             key={list.id}

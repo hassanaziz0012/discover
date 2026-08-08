@@ -153,7 +153,9 @@ export default function CreatorsList({
     );
   }
 
-  if (creators.length === 0) {
+  const safeCreators = Array.isArray(creators) ? creators : [];
+
+  if (safeCreators.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-center py-20 px-6 bg-surface border border-border-subtle rounded-2xl shadow-xs animate-fade-in my-6">
         <div className="text-disabled bg-surface-raised p-5 rounded-full mb-6">
@@ -182,7 +184,7 @@ export default function CreatorsList({
           : "flex flex-col gap-4 w-full my-4 animate-fade-in"
       }
     >
-      {creators.map((creator) => (
+      {safeCreators.map((creator) => (
         <Link
           key={creator.channel_id}
           href={`/creators/${encodeURIComponent(creator.channel_id)}/outliers`}

@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from db.session import SessionLocal
 from db.models import Creator, Video
@@ -76,9 +77,13 @@ def fetch_channels_metadata_from_api(youtube, channel_ids: List[str]) -> Dict[st
     return results
 
 
-def get_creators(db: Optional[Session] = None) -> List[Dict[str, Any]]:
+def get_creators(
+    db: Optional[Session] = None, 
+    page: int = 1, 
+    limit: int = 50
+) -> Dict[str, Any]:
     """
-    Retrieves all YouTube channel/creator records directly from PostgreSQL,
+    Retrieves YouTube channel/creator records from PostgreSQL with pagination,
     sorted by subscriber count descending.
     """
     close_db = False
@@ -87,7 +92,15 @@ def get_creators(db: Optional[Session] = None) -> List[Dict[str, Any]]:
         close_db = True
 
     try:
-        creators_db = db.query(Creator).order_by(Creator.subscriber_count.desc()).all()
+        total_count = db.query(func.count(Creator.channel_id)).scalar() or 0
+        offset = (page - 1) * limit
+        creators_db = (
+            db.query(Creator)
+            .order_by(Creator.subscriber_count.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
         result_list = []
         for c in creators_db:
             result_list.append({
@@ -99,7 +112,13 @@ def get_creators(db: Optional[Session] = None) -> List[Dict[str, Any]]:
                 "subscriber_count": c.subscriber_count or 0,
                 "video_count": c.video_count or len(c.videos)
             })
-        return result_list
+        return {
+            "creators": result_list,
+            "total": total_count,
+            "page": page,
+            "limit": limit,
+            "has_more": (offset + len(result_list)) < total_count
+        }
     finally:
         if close_db:
             db.close()

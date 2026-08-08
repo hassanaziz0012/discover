@@ -10,6 +10,7 @@ import ManageListsModal from "@/app/components/ManageListsModal";
 import EditListModal from "@/app/components/EditListModal";
 import RefreshReportModal, { RefreshReport } from "@/app/components/RefreshReportModal";
 import DiscoverCreatorsModal from "@/app/components/DiscoverCreatorsModal";
+import LoadingFooter from "@/app/components/LoadingFooter";
 import { UserList } from "@/app/types/list";
 import { API_BASE_URL } from "@/app/utils/constants";
 
@@ -50,23 +51,66 @@ export default function CreatorsPage() {
       }
     }
     fetchLists();
-    fetchCreators();
+    fetchCreators(1, true);
   }, []);
 
-  // Creators API States
+  // Creators API States & Pagination
   const [creators, setCreators] = useState<Creator[]>([]);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [totalCreators, setTotalCreators] = useState(0);
   const [creatorsLoading, setCreatorsLoading] = useState(false);
   const [creatorsError, setCreatorsError] = useState<string | null>(null);
 
-  // Fetch cached creators from backend API
-  async function fetchCreators() {
-    setCreatorsLoading(true);
+  const isFetchingRef = React.useRef(false);
+  const pageRef = React.useRef(page);
+  const hasMoreRef = React.useRef(hasMore);
+  const isLoadingRef = React.useRef(creatorsLoading || isLoadingMore);
+
+  useEffect(() => {
+    pageRef.current = page;
+    hasMoreRef.current = hasMore;
+    isLoadingRef.current = creatorsLoading || isLoadingMore;
+  });
+
+  // Fetch cached creators from backend API with pagination
+  async function fetchCreators(pageToFetch: number = 1, isReset: boolean = false) {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+
+    if (isReset) {
+      setCreatorsLoading(true);
+      setPage(1);
+    } else {
+      setIsLoadingMore(true);
+    }
     setCreatorsError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/youtube/cached-creators`);
+      const response = await fetch(`${API_BASE_URL}/api/youtube/cached-creators?page=${pageToFetch}&limit=50`);
       if (response.ok) {
         const data = await response.json();
-        setCreators(data);
+        const newCreators: Creator[] = Array.isArray(data.creators)
+          ? data.creators
+          : Array.isArray(data)
+          ? data.slice(0, 50)
+          : [];
+        const total: number = data.total ?? newCreators.length;
+        const hasMoreFlag: boolean = data.has_more ?? false;
+
+        setCreators((prev) => {
+          if (isReset) return newCreators;
+          const combined = [...prev, ...newCreators];
+          const seen = new Set<string>();
+          return combined.filter((c) => {
+            if (!c.channel_id || seen.has(c.channel_id)) return false;
+            seen.add(c.channel_id);
+            return true;
+          });
+        });
+        setTotalCreators(total);
+        setHasMore(hasMoreFlag);
+        setPage(pageToFetch);
       } else {
         const errJson = await response.json().catch(() => ({}));
         setCreatorsError(errJson.detail || `Failed to fetch creators (Server status: ${response.status})`);
@@ -76,8 +120,38 @@ export default function CreatorsPage() {
       setCreatorsError("Unable to connect to the backend server. Please verify that the uvicorn server is running on port 8000.");
     } finally {
       setCreatorsLoading(false);
+      setIsLoadingMore(false);
+      isFetchingRef.current = false;
     }
   }
+
+  // Infinite Scroll IntersectionObserver effect
+  useEffect(() => {
+    const sentinel = document.getElementById("scroll-sentinel");
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (
+          entries[0].isIntersecting &&
+          hasMoreRef.current &&
+          !isLoadingRef.current &&
+          !isFetchingRef.current
+        ) {
+          fetchCreators(pageRef.current + 1, false);
+        }
+      },
+      {
+        rootMargin: "300px",
+      }
+    );
+
+    observer.observe(sentinel);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   // Refresh Creators States
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -98,8 +172,10 @@ export default function CreatorsPage() {
       });
       if (response.ok) {
         const data = await response.json();
-        if (data.creators) {
+        if (Array.isArray(data.creators)) {
           setCreators(data.creators);
+        } else {
+          fetchCreators(1, true);
         }
         setRefreshReport({
           title: "Subscription Sync Complete",
@@ -137,8 +213,10 @@ export default function CreatorsPage() {
       });
       if (response.ok) {
         const data = await response.json();
-        if (data.creators) {
+        if (Array.isArray(data.creators)) {
           setCreators(data.creators);
+        } else {
+          fetchCreators(1, true);
         }
         setRefreshReport({
           message: data.message || "Successfully refreshed all channels.",
@@ -345,6 +423,7 @@ export default function CreatorsPage() {
                 selectedListId={selectedListId}
                 onSelectListId={setSelectedListId}
                 creators={creators}
+                totalCreators={totalCreators}
                 onManageListClick={() => setIsEditListModalOpen(true)}
               />
             )}
@@ -355,11 +434,21 @@ export default function CreatorsPage() {
           creators={displayedCreators}
           isLoading={creatorsLoading}
           error={creatorsError}
-          onRetry={fetchCreators}
+          onRetry={() => fetchCreators(1, true)}
           layout={creatorsLayout}
           onManageLists={setActiveManageListCreator}
           onDeleteChannel={handleDeleteChannel}
         />
+
+        {/* Infinite Scroll Footer */}
+        {!creatorsLoading && !creatorsError && (
+          <LoadingFooter
+            hasMore={hasMore}
+            isLoading={isLoadingMore}
+            loadingText="Loading more channels..."
+            scrollText="Scroll down to load more channels..."
+          />
+        )}
       </main>
 
       {/* Refresh Report Modal */}
@@ -394,7 +483,7 @@ export default function CreatorsPage() {
       <DiscoverCreatorsModal
         isOpen={isDiscoverModalOpen}
         onClose={() => setIsDiscoverModalOpen(false)}
-        onCreatorsAdded={fetchCreators}
+        onCreatorsAdded={() => fetchCreators(1, true)}
       />
     </div>
   );
