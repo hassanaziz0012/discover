@@ -29,4 +29,8 @@ export interface ApiResponse {
   average_views: number;
   average_likes: number;
   outliers: ApiOutlier[];
+  total_outliers: number;
+  page: number;
+  per_page: number;
+  has_more: boolean;
 }
