@@ -113,8 +113,9 @@ scheduler.add_job(refresh_cached_creators_outliers, 'cron', day_of_week='sun', h
 
 ## 4. Implementation Steps for the Agent
 
-- [ ] **Step 1**: Create `discover_api/youtube/crawler/category_crawler.py` using `videos.list(chart="mostPopular")` across YouTube category IDs.
-- [ ] **Step 2**: Optimize channel fetching by batching 50 channel IDs per `channels.list` call.
+- [x] **Step 1**: Create `discover_api/youtube/crawler/category_crawler.py` using `videos.list(chart="mostPopular")` across YouTube category IDs.
+- [x] **Step 2**: Optimize channel fetching by batching 50 channel IDs per `channels.list` call.
+
 - [ ] **Step 3**: Implement `discover_api/youtube/search_ingest.py` to auto-fetch and index missing creators upon user search.
 - [ ] **Step 4**: Implement `discover_api/youtube/crawler/graph_crawler.py` to discover micro-creators ($< 20\text{K}$ subs) via related videos and featured channels.
 - [ ] **Step 5**: Create `discover_api/scripts/import_dataset.py` for bulk CSV dataset ingestion.
