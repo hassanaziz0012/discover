@@ -30,11 +30,23 @@ def get_outliers(
     exclude_shorts: bool = Query(
         False,
         description="Optional: whether to exclude YouTube Shorts from results."
+    ),
+    page: int = Query(
+        1,
+        ge=1,
+        description="Page number for pagination."
+    ),
+    per_page: int = Query(
+        50,
+        ge=1,
+        le=200,
+        description="Number of outliers per page."
     )
 ):
     """
     Identify outlier videos on a YouTube channel.
     Calculates view and like ratio averages to determine which videos overperformed.
+    Results are paginated to reduce payload size.
     """
     try:
         if days is not None and days <= 0:
@@ -43,6 +55,21 @@ def get_outliers(
             raise HTTPException(status_code=400, detail="The limit parameter must be a positive integer.")
 
         outliers_report = calculate_outliers(channel_input=channel, days=days, limit=limit, exclude_shorts=exclude_shorts)
+
+        # Paginate the outliers array
+        all_outliers = outliers_report.get("outliers", [])
+        total_outliers = len(all_outliers)
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        paginated_outliers = all_outliers[start_idx:end_idx]
+        has_more = end_idx < total_outliers
+
+        outliers_report["outliers"] = paginated_outliers
+        outliers_report["total_outliers"] = total_outliers
+        outliers_report["page"] = page
+        outliers_report["per_page"] = per_page
+        outliers_report["has_more"] = has_more
+
         return outliers_report
     except ValueError as e:
         logger.error(f"Validation error in fetch-outliers: {e}", exc_info=True)
