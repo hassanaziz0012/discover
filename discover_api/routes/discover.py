@@ -117,7 +117,7 @@ async def bulk_add_creators(request: BulkAddRequest, db: Session = Depends(get_d
         async with sem:
             try:
                 videos, new_count, cached_count = await asyncio.to_thread(
-                    fetch_channel_videos, api_key, cid, False, True, db
+                    fetch_channel_videos, api_key, cid, False, True
                 )
                 return {
                     "channel_id": cid,

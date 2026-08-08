@@ -107,27 +107,38 @@ def check_youtube_connectivity() -> bool:
     return _YOUTUBE_REACHABLE
 
 
-def ensure_shorts_classification(videos_data: list) -> bool:
+def ensure_shorts_classification(videos_data: list, force_recheck: bool = False) -> bool:
     """
     On-the-fly classification of YouTube Shorts for a list of serialized videos.
     Modifies the dictionaries in place and returns True if any changes were made.
+
+    Rules:
+    - Videos longer than 180s are automatically considered long videos (is_short = False).
+    - Videos <= 180s (or with missing duration) run an HTTP HEAD check against youtube.com/shorts/{video_id}.
     """
     from .utils import parse_iso8601_duration
     needs_check = []
     modified = False
     
     for i, v in enumerate(videos_data):
-        if "is_short" not in v or v["is_short"] is None:
+        if force_recheck or "is_short" not in v or v["is_short"] is None:
             duration = v.get("duration")
-            duration_sec = parse_iso8601_duration(duration)
-            if duration_sec is not None and duration_sec > 60:
-                v["is_short"] = False
-                modified = True
+            if isinstance(duration, (int, float)):
+                duration_sec = int(duration)
             else:
-                # If YouTube is unreachable, use offline heuristic immediately
-                if not check_youtube_connectivity():
-                    v["is_short"] = True
+                duration_sec = parse_iso8601_duration(duration)
+
+            if duration_sec is not None and duration_sec > 180:
+                if v.get("is_short") != False:
+                    v["is_short"] = False
                     modified = True
+            else:
+                # If YouTube is unreachable, fall back to offline heuristic (<= 60s)
+                if not check_youtube_connectivity():
+                    is_short_val = (duration_sec is not None and duration_sec <= 60)
+                    if v.get("is_short") != is_short_val:
+                        v["is_short"] = is_short_val
+                        modified = True
                 else:
                     needs_check.append((i, v["video_id"]))
     
@@ -149,11 +160,13 @@ def ensure_shorts_classification(videos_data: list) -> bool:
                 logger.warning(f"Error checking YouTube Short status for {video_id}: {e}")
                 return False
                 
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        with ThreadPoolExecutor(max_workers=20) as executor:
             results = list(executor.map(lambda x: check_short_http(x[1]), needs_check))
             
         for (idx, _), is_short in zip(needs_check, results):
-            videos_data[idx]["is_short"] = is_short
+            if videos_data[idx].get("is_short") != is_short:
+                videos_data[idx]["is_short"] = is_short
+                modified = True
             
         return True
     return modified
@@ -264,6 +277,7 @@ def fetch_video_details(youtube, video_ids: list[str]) -> list[Video]:
 
 
 from sqlalchemy.orm import Session
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from db.session import SessionLocal
 from db.models import Creator as CreatorModel, Video as VideoModel
 from datetime import timezone
@@ -275,12 +289,12 @@ def db_to_video(v: VideoModel, channel_title: str = "") -> Video:
         c_title = v.creator.name
     return Video(
         video_id=v.video_id,
+        channel_title=c_title,
         title=v.title or "",
         description=v.description or "",
         published_at=v.published_at,
         thumbnail_url=v.thumbnail_url or "",
         channel_id=v.channel_id,
-        channel_title=c_title or "Unknown Creator",
         view_count=v.view_count,
         like_count=v.like_count,
         comment_count=v.comment_count,
@@ -354,19 +368,24 @@ def fetch_channel_videos(
 
         # 4. Save/Upsert new videos to PostgreSQL database
         if new_videos:
+            now = datetime.now(timezone.utc)
             # Ensure creator record exists
             if not creator_record:
                 creator_name = new_videos[0].channel_title or "Unknown Channel"
-                creator_record = CreatorModel(
-                    channel_id=channel_id,
-                    name=creator_name,
-                    subscriber_count=0,
-                    video_count=0,
-                    last_synced_at=datetime.now(timezone.utc)
-                )
-                db.add(creator_record)
+                creator_stmt = pg_insert(CreatorModel).values({
+                    "channel_id": channel_id,
+                    "name": creator_name,
+                    "subscriber_count": 0,
+                    "video_count": 0,
+                    "last_synced_at": now,
+                    "created_at": now,
+                    "updated_at": now
+                }).on_conflict_do_nothing(index_elements=["channel_id"])
+                db.execute(creator_stmt)
                 db.flush()
-                channel_title = creator_name
+                creator_record = db.query(CreatorModel).filter(CreatorModel.channel_id == channel_id).first()
+                if creator_record:
+                    channel_title = creator_record.name
 
             serialized_new = [video_to_dict(v) for v in new_videos]
             ensure_shorts_classification(serialized_new)
@@ -374,49 +393,46 @@ def fetch_channel_videos(
                 v.is_short = sv.get("is_short")
 
             from .utils import parse_iso8601_duration
+            video_records = []
             for v in new_videos:
                 dur_sec = parse_iso8601_duration(v.duration) or 0
-                existing_v = db.query(VideoModel).filter(VideoModel.video_id == v.video_id).first()
-                if existing_v:
-                    existing_v.title = v.title
-                    existing_v.description = v.description
-                    existing_v.published_at = v.published_at
-                    existing_v.thumbnail_url = v.thumbnail_url
-                    existing_v.view_count = v.view_count or 0
-                    existing_v.like_count = v.like_count or 0
-                    existing_v.comment_count = v.comment_count or 0
-                    existing_v.duration = dur_sec
-                    existing_v.is_short = v.is_short or False
-                    existing_v.category_id = v.category_id
-                    existing_v.live_broadcast = v.live_broadcast
-                    existing_v.tags = v.tags
-                    existing_v.url = v.url or f"https://www.youtube.com/watch?v={v.video_id}"
-                    existing_v.updated_at = datetime.now(timezone.utc)
-                else:
-                    new_v_record = VideoModel(
-                        video_id=v.video_id,
-                        channel_id=channel_id,
-                        title=v.title,
-                        description=v.description,
-                        published_at=v.published_at,
-                        thumbnail_url=v.thumbnail_url,
-                        view_count=v.view_count or 0,
-                        like_count=v.like_count or 0,
-                        comment_count=v.comment_count or 0,
-                        duration=dur_sec,
-                        is_short=v.is_short or False,
-                        category_id=v.category_id,
-                        live_broadcast=v.live_broadcast,
-                        tags=v.tags,
-                        url=v.url or f"https://www.youtube.com/watch?v={v.video_id}",
-                        created_at=datetime.now(timezone.utc),
-                        updated_at=datetime.now(timezone.utc)
-                    )
-                    db.add(new_v_record)
+                video_records.append({
+                    "video_id": v.video_id,
+                    "channel_id": channel_id,
+                    "title": v.title,
+                    "description": v.description,
+                    "published_at": v.published_at,
+                    "thumbnail_url": v.thumbnail_url,
+                    "view_count": v.view_count or 0,
+                    "like_count": v.like_count or 0,
+                    "comment_count": v.comment_count or 0,
+                    "duration": dur_sec,
+                    "is_short": v.is_short or False,
+                    "category_id": v.category_id,
+                    "live_broadcast": v.live_broadcast,
+                    "tags": v.tags,
+                    "url": v.url or f"https://www.youtube.com/watch?v={v.video_id}",
+                    "created_at": now,
+                    "updated_at": now,
+                })
+
+            if video_records:
+                stmt = pg_insert(VideoModel).values(video_records)
+                update_cols = {
+                    col.name: col
+                    for col in stmt.excluded
+                    if col.name not in ("video_id", "created_at")
+                }
+                upsert_stmt = stmt.on_conflict_do_update(
+                    index_elements=["video_id"],
+                    set_=update_cols
+                )
+                db.execute(upsert_stmt)
 
             if creator_record:
                 creator_record.video_count = db.query(VideoModel).filter(VideoModel.channel_id == channel_id).count()
-                creator_record.last_synced_at = datetime.now(timezone.utc)
+                creator_record.last_synced_at = now
+
             db.commit()
             logger.info(f"      Saved {len(new_videos)} videos to PostgreSQL database")
 
@@ -429,7 +445,11 @@ def fetch_channel_videos(
             return all_videos, len(new_videos), len(cached_videos)
         return all_videos
 
+    except Exception as e:
+        if db:
+            db.rollback()
+        logger.error(f"Error in fetch_channel_videos for channel {channel_id}: {e}")
+        raise e
     finally:
         if close_db:
             db.close()
-

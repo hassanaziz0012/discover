@@ -135,7 +135,7 @@ async def refresh_creators(db: Session = Depends(get_db)):
             try:
                 # fresh=False to skip already existing videos and only retrieve new uploads
                 videos, new_count, cached_count = await asyncio.to_thread(
-                    fetch_channel_videos, api_key, cid, False, True, db
+                    fetch_channel_videos, api_key, cid, False, True
                 )
                 return cid, new_count, cached_count, None
             except Exception as ex:
@@ -251,7 +251,7 @@ async def sync_subscriptions(
                 async with sem:
                     try:
                         videos, new_count, cached_count = await asyncio.to_thread(
-                            fetch_channel_videos, api_key, cid, False, True, db
+                            fetch_channel_videos, api_key, cid, False, True
                         )
                         return {
                             "channel_id": cid,
