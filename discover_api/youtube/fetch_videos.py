@@ -2,16 +2,19 @@
 YouTube Channel Video Fetcher
 ==============================
 Fetches all videos from a YouTube channel using the YouTube Data API v3
-and organizes them into a list of structured Video objects.
+and organizes them into a list of structured Video objects. Uses thread-safe
+multithreading and producer-consumer pipelining for high throughput.
 """
 
 import os
 import sys
 import json
 import logging
-from datetime import datetime
+import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Union, Tuple, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from dotenv import load_dotenv
 
@@ -26,6 +29,21 @@ load_dotenv()
 
 API_KEY    = os.getenv("YOUTUBE_API_KEY")
 CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID")
+
+
+# ── Thread-Local API Client ───────────────────────────────────────────────────
+_thread_local = threading.local()
+
+def _get_thread_youtube_client(api_key: Optional[str] = None):
+    """
+    Retrieve or initialize a thread-local YouTube API client resource.
+    Guarantees thread-safety when executing API calls in concurrent worker threads.
+    """
+    key = api_key or os.getenv("YOUTUBE_API_KEY")
+    if not hasattr(_thread_local, "client") or getattr(_thread_local, "api_key", None) != key:
+        _thread_local.api_key = key
+        _thread_local.client = get_youtube_client(key)
+    return _thread_local.client
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -94,7 +112,6 @@ def check_youtube_connectivity() -> bool:
     
     import requests
     try:
-        # A quick check to see if we can reach YouTube
         res = requests.head(
             "https://www.youtube.com", 
             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}, 
@@ -133,7 +150,6 @@ def ensure_shorts_classification(videos_data: list, force_recheck: bool = False)
                     v["is_short"] = False
                     modified = True
             else:
-                # If YouTube is unreachable, fall back to offline heuristic (<= 60s)
                 if not check_youtube_connectivity():
                     is_short_val = (duration_sec is not None and duration_sec <= 60)
                     if v.get("is_short") != is_short_val:
@@ -144,17 +160,25 @@ def ensure_shorts_classification(videos_data: list, force_recheck: bool = False)
     
     if needs_check:
         import requests
-        from concurrent.futures import ThreadPoolExecutor
-        
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+
         session = requests.Session()
         session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         })
+        retry_strategy = Retry(
+            total=1,
+            backoff_factor=0.5,
+            status_forcelist=[429, 500, 502, 503, 504],
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        session.mount("https://", adapter)
         
         def check_short_http(video_id: str) -> bool:
             url = f"https://www.youtube.com/shorts/{video_id}"
             try:
-                res = session.head(url, allow_redirects=False, timeout=3)
+                res = session.head(url, allow_redirects=False, timeout=5)
                 return res.status_code == 200
             except Exception as e:
                 logger.warning(f"Error checking YouTube Short status for {video_id}: {e}")
@@ -172,7 +196,7 @@ def ensure_shorts_classification(videos_data: list, force_recheck: bool = False)
     return modified
 
 
-# ── Core functions ────────────────────────────────────────────────────────────
+# ── Core API functions ────────────────────────────────────────────────────────
 
 def get_uploads_playlist_id(youtube, channel_id: str) -> str:
     """
@@ -193,7 +217,7 @@ def get_uploads_playlist_id(youtube, channel_id: str) -> str:
 
 def fetch_all_video_ids(youtube, uploads_playlist_id: str, cached_ids: Optional[set[str]] = None) -> tuple[list[str], bool]:
     """
-    Page through the uploads playlist and collect every video ID.
+    Page through the uploads playlist and collect every video ID sequentially.
     If cached_ids is provided, stop paging when we encounter an ID already in cache.
     Returns a tuple: (list of new video_ids, hit_cache boolean).
     """
@@ -220,11 +244,10 @@ def fetch_all_video_ids(youtube, uploads_playlist_id: str, cached_ids: Optional[
         if hit_cache:
             break
 
-        # Log progress status message after every 500 videos collected
         if len(video_ids) // 500 > (len(video_ids) - len(items)) // 500:
             milestone = (len(video_ids) // 500) * 500
             if milestone > 0:
-                logger.info(f"      Fetched {milestone} videos")
+                logger.info(f"      Fetched {milestone} video IDs")
 
         next_page_token = response.get("nextPageToken")
         if not next_page_token:
@@ -233,22 +256,29 @@ def fetch_all_video_ids(youtube, uploads_playlist_id: str, cached_ids: Optional[
     return video_ids, hit_cache
 
 
-def fetch_video_details(youtube, video_ids: list[str]) -> list[Video]:
+def fetch_video_details(
+    youtube=None,
+    video_ids: list[str] = None,
+    max_workers: int = 16,
+    api_key: Optional[str] = None
+) -> list[Video]:
     """
-    Fetch full metadata + statistics for a list of video IDs.
-    The API accepts up to 50 IDs per request, so we batch them.
+    Fetch full metadata + statistics for a list of video IDs using multithreading.
+    The API accepts up to 50 IDs per request. Batches are processed concurrently across worker threads.
     """
-    videos = []
+    if not video_ids:
+        return []
 
-    # Process in batches of 50
-    for i in range(0, len(video_ids), 50):
-        batch = video_ids[i : i + 50]
+    batches = [video_ids[i : i + 50] for i in range(0, len(video_ids), 50)]
 
-        response = youtube.videos().list(
+    def _fetch_batch(batch_ids: list[str]) -> list[Video]:
+        client = _get_thread_youtube_client(api_key) if (api_key or not youtube) else youtube
+        response = client.videos().list(
             part="snippet,statistics,contentDetails",
-            id=",".join(batch),
+            id=",".join(batch_ids),
         ).execute()
 
+        batch_videos = []
         for item in response.get("items", []):
             snippet    = item.get("snippet", {})
             stats      = item.get("statistics", {})
@@ -271,16 +301,28 @@ def fetch_video_details(youtube, video_ids: list[str]) -> list[Video]:
                 comment_count  = int(stats["commentCount"]) if "commentCount" in stats else None,
                 duration       = content.get("duration"),
             )
-            videos.append(video)
+            batch_videos.append(video)
+        return batch_videos
+
+    if len(batches) == 1:
+        return _fetch_batch(batches[0])
+
+    num_workers = min(max_workers, len(batches))
+    videos = []
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        futures = [executor.submit(_fetch_batch, b) for b in batches]
+        for f in futures:
+            videos.extend(f.result())
 
     return videos
 
+
+# ── Database Helpers ──────────────────────────────────────────────────────────
 
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from db.session import SessionLocal
 from db.models import Creator as CreatorModel, Video as VideoModel
-from datetime import timezone
 
 def db_to_video(v: VideoModel, channel_title: str = "") -> Video:
     """Convert SQLAlchemy VideoModel record to domain Video object."""
@@ -307,6 +349,18 @@ def db_to_video(v: VideoModel, channel_title: str = "") -> Video:
     )
 
 
+# ── Synchronization Locks ─────────────────────────────────────────────────────
+
+_channel_locks: dict[str, threading.Lock] = {}
+_channel_locks_guard = threading.Lock()
+
+def _get_channel_lock(channel_id: str) -> threading.Lock:
+    with _channel_locks_guard:
+        if channel_id not in _channel_locks:
+            _channel_locks[channel_id] = threading.Lock()
+        return _channel_locks[channel_id]
+
+
 # ── Core Pipeline ─────────────────────────────────────────────────────────────
 
 def fetch_channel_videos(
@@ -314,142 +368,224 @@ def fetch_channel_videos(
     channel_id: str,
     fresh: bool = False,
     return_detailed: bool = False,
-    db: Optional[Session] = None
+    db: Optional[Session] = None,
+    max_workers: int = 16
 ) -> Union[Tuple[List[Video], int, int], List[Video]]:
     """
-    Full pipeline with database persistence:
-    Query existing videos from PostgreSQL → page uploads playlist from API if needed
-    → enrich new video IDs → bulk upsert to PostgreSQL → return Video objects.
+    Full high-performance pipeline with database persistence & multithreaded pipelining:
+    Query existing videos from PostgreSQL → page uploads playlist from API
+    → enrich new video details concurrently using worker threads → bulk upsert to PostgreSQL
+    → return Video objects.
+    
+    Thread-safe: Concurrent requests for the same channel_id are synchronized
+    using per-channel locks so only one request fetches from the YouTube API while
+    subsequent requests reuse the newly saved database cache. Thread-local clients prevent
+    transport race conditions across worker threads.
     """
-    close_db = False
-    if db is None:
-        db = SessionLocal()
-        close_db = True
+    channel_lock = _get_channel_lock(channel_id)
+    with channel_lock:
+        close_db = False
+        if db is None:
+            db = SessionLocal()
+            close_db = True
+        else:
+            db.expire_all()
 
-    try:
-        # 1. Query cached videos from PostgreSQL
-        db_videos = db.query(VideoModel).filter(VideoModel.channel_id == channel_id).order_by(VideoModel.published_at.desc()).all()
-        creator_record = db.query(CreatorModel).filter(CreatorModel.channel_id == channel_id).first()
-        channel_title = creator_record.name if creator_record else ""
+        try:
+            # 1. Query cached videos from PostgreSQL
+            db_videos = db.query(VideoModel).filter(VideoModel.channel_id == channel_id).order_by(VideoModel.published_at.desc()).all()
+            creator_record = db.query(CreatorModel).filter(CreatorModel.channel_id == channel_id).first()
+            channel_title = creator_record.name if creator_record else ""
 
-        cached_videos = [db_to_video(v, channel_title) for v in db_videos] if not fresh else []
-        cached_ids = {v.video_id for v in cached_videos}
-        
-        if cached_videos:
-            logger.info(f"      Fetched {len(cached_videos)} videos from PostgreSQL database")
+            cached_videos = [db_to_video(v, channel_title) for v in db_videos] if not fresh else []
+            cached_ids = {v.video_id for v in cached_videos}
+            
+            if cached_videos:
+                logger.info(f"      Fetched {len(cached_videos)} videos from PostgreSQL database")
 
-        youtube = get_youtube_client(api_key)
+            youtube = get_youtube_client(api_key)
 
-        logger.info(f"[1/3] Fetching uploads playlist for channel: {channel_id}")
-        uploads_playlist_id = get_uploads_playlist_id(youtube, channel_id)
+            logger.info(f"[1/3] Fetching uploads playlist for channel: {channel_id}")
+            uploads_playlist_id = get_uploads_playlist_id(youtube, channel_id)
 
-        # 2. Fetch video IDs from API, stopping early if we encounter a cached ID
-        logger.info(f"[2/3] Collecting new video IDs from playlist: {uploads_playlist_id}")
-        if fresh:
-            logger.info("      Bypassing cached data (--fresh requested)...")
-        
-        new_video_ids, hit_cache = fetch_all_video_ids(
-            youtube, 
-            uploads_playlist_id, 
-            cached_ids=cached_ids if not fresh else None
-        )
-        
-        if hit_cache:
-            logger.info("      Found cached video ID in database. Stopping API fetch.")
-        
-        logger.info(f"      Found {len(new_video_ids)} new videos to fetch from API")
+            # 2 & 3. Fetch video IDs & details from API concurrently using producer-consumer pipelining
+            logger.info(f"[2/3] Collecting video IDs & enriching metadata concurrently from playlist: {uploads_playlist_id}")
+            if fresh:
+                logger.info("      Bypassing cached data (--fresh requested)...")
+            
+            new_video_ids = []
+            new_videos = []
+            hit_cache = False
+            next_page_token = None
 
-        # 3. Fetch details for new videos from API
-        new_videos = []
-        if new_video_ids:
-            logger.info("[3/3] Fetching full metadata and statistics for new videos …")
-            new_videos = fetch_video_details(youtube, new_video_ids)
-            logger.info(f"      Fetched {len(new_videos)} videos from API")
+            def _fetch_batch_ids(batch_ids: list[str]) -> list[Video]:
+                client = _get_thread_youtube_client(api_key)
+                response = client.videos().list(
+                    part="snippet,statistics,contentDetails",
+                    id=",".join(batch_ids),
+                ).execute()
 
-        # 4. Save/Upsert new videos to PostgreSQL database
-        if new_videos:
-            now = datetime.now(timezone.utc)
-            # Ensure creator record exists
-            if not creator_record:
-                creator_name = new_videos[0].channel_title or "Unknown Channel"
-                creator_stmt = pg_insert(CreatorModel).values({
-                    "channel_id": channel_id,
-                    "name": creator_name,
-                    "subscriber_count": 0,
-                    "video_count": 0,
-                    "last_synced_at": now,
-                    "created_at": now,
-                    "updated_at": now
-                }).on_conflict_do_nothing(index_elements=["channel_id"])
-                db.execute(creator_stmt)
-                db.flush()
-                creator_record = db.query(CreatorModel).filter(CreatorModel.channel_id == channel_id).first()
+                batch_videos = []
+                for item in response.get("items", []):
+                    snippet    = item.get("snippet", {})
+                    stats      = item.get("statistics", {})
+                    content    = item.get("contentDetails", {})
+                    thumbnails = snippet.get("thumbnails", {})
+
+                    video = Video(
+                        video_id       = item["id"],
+                        title          = snippet.get("title", ""),
+                        description    = snippet.get("description", ""),
+                        published_at   = _parse_dt(snippet.get("publishedAt", "1970-01-01T00:00:00Z")),
+                        thumbnail_url  = _best_thumbnail(thumbnails),
+                        channel_id     = snippet.get("channelId", ""),
+                        channel_title  = snippet.get("channelTitle", ""),
+                        tags           = snippet.get("tags", []),
+                        category_id    = snippet.get("categoryId"),
+                        live_broadcast = snippet.get("liveBroadcastContent"),
+                        view_count     = int(stats["viewCount"])    if "viewCount"    in stats else None,
+                        like_count     = int(stats["likeCount"])    if "likeCount"    in stats else None,
+                        comment_count  = int(stats["commentCount"]) if "commentCount" in stats else None,
+                        duration       = content.get("duration"),
+                    )
+                    batch_videos.append(video)
+                return batch_videos
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = []
+
+                while True:
+                    response = youtube.playlistItems().list(
+                        part="contentDetails",
+                        playlistId=uploads_playlist_id,
+                        maxResults=50,
+                        pageToken=next_page_token,
+                    ).execute()
+
+                    items = response.get("items", [])
+                    page_vids = []
+                    for item in items:
+                        vid = item["contentDetails"]["videoId"]
+                        if not fresh and cached_ids and vid in cached_ids:
+                            hit_cache = True
+                            break
+                        page_vids.append(vid)
+                        new_video_ids.append(vid)
+
+                    if page_vids:
+                        futures.append(executor.submit(_fetch_batch_ids, page_vids))
+
+                    if hit_cache:
+                        break
+
+                    if len(new_video_ids) // 500 > (len(new_video_ids) - len(items)) // 500:
+                        milestone = (len(new_video_ids) // 500) * 500
+                        if milestone > 0:
+                            logger.info(f"      Collected {milestone} video IDs (enriching metadata concurrently in background...)")
+
+                    next_page_token = response.get("nextPageToken")
+                    if not next_page_token:
+                        break
+
+                if hit_cache:
+                    logger.info("      Found cached video ID in database. Stopping API fetch.")
+
+                logger.info(f"      Collected {len(new_video_ids)} new video IDs across API pages")
+
+                # Collect detail results as they complete
+                if futures:
+                    logger.info(f"[3/3] Awaiting concurrent metadata enrichment across {len(futures)} batches...")
+                    for f in futures:
+                        new_videos.extend(f.result())
+                    logger.info(f"      Fetched {len(new_videos)} detailed video objects from API")
+
+            # 4. Save/Upsert new videos to PostgreSQL database
+            if new_videos:
+                now = datetime.now(timezone.utc)
+                # Ensure creator record exists
+                if not creator_record:
+                    creator_name = new_videos[0].channel_title or "Unknown Channel"
+                    creator_stmt = pg_insert(CreatorModel).values({
+                        "channel_id": channel_id,
+                        "name": creator_name,
+                        "subscriber_count": 0,
+                        "video_count": 0,
+                        "last_synced_at": now,
+                        "created_at": now,
+                        "updated_at": now
+                    }).on_conflict_do_nothing(index_elements=["channel_id"])
+                    db.execute(creator_stmt)
+                    db.flush()
+                    creator_record = db.query(CreatorModel).filter(CreatorModel.channel_id == channel_id).first()
+                    if creator_record:
+                        channel_title = creator_record.name
+
+                serialized_new = [video_to_dict(v) for v in new_videos]
+                ensure_shorts_classification(serialized_new)
+                for v, sv in zip(new_videos, serialized_new):
+                    v.is_short = sv.get("is_short")
+
+                from .utils import parse_iso8601_duration
+                video_records = []
+                for v in new_videos:
+                    dur_sec = parse_iso8601_duration(v.duration) or 0
+                    video_records.append({
+                        "video_id": v.video_id,
+                        "channel_id": channel_id,
+                        "title": v.title,
+                        "description": v.description,
+                        "published_at": v.published_at,
+                        "thumbnail_url": v.thumbnail_url,
+                        "view_count": v.view_count or 0,
+                        "like_count": v.like_count or 0,
+                        "comment_count": v.comment_count or 0,
+                        "duration": dur_sec,
+                        "is_short": v.is_short or False,
+                        "category_id": v.category_id,
+                        "live_broadcast": v.live_broadcast,
+                        "tags": v.tags,
+                        "url": v.url or f"https://www.youtube.com/watch?v={v.video_id}",
+                        "created_at": now,
+                        "updated_at": now,
+                    })
+
+                if video_records:
+                    batch_size = 1000
+                    for i in range(0, len(video_records), batch_size):
+                        batch = video_records[i : i + batch_size]
+                        stmt = pg_insert(VideoModel).values(batch)
+                        update_cols = {
+                            col.name: col
+                            for col in stmt.excluded
+                            if col.name not in ("video_id", "created_at")
+                        }
+                        upsert_stmt = stmt.on_conflict_do_update(
+                            index_elements=["video_id"],
+                            set_=update_cols
+                        )
+                        db.execute(upsert_stmt)
+
                 if creator_record:
-                    channel_title = creator_record.name
+                    creator_record.video_count = db.query(VideoModel).filter(VideoModel.channel_id == channel_id).count()
+                    creator_record.last_synced_at = now
 
-            serialized_new = [video_to_dict(v) for v in new_videos]
-            ensure_shorts_classification(serialized_new)
-            for v, sv in zip(new_videos, serialized_new):
-                v.is_short = sv.get("is_short")
+                db.commit()
+                logger.info(f"      Saved {len(new_videos)} videos to PostgreSQL database")
 
-            from .utils import parse_iso8601_duration
-            video_records = []
-            for v in new_videos:
-                dur_sec = parse_iso8601_duration(v.duration) or 0
-                video_records.append({
-                    "video_id": v.video_id,
-                    "channel_id": channel_id,
-                    "title": v.title,
-                    "description": v.description,
-                    "published_at": v.published_at,
-                    "thumbnail_url": v.thumbnail_url,
-                    "view_count": v.view_count or 0,
-                    "like_count": v.like_count or 0,
-                    "comment_count": v.comment_count or 0,
-                    "duration": dur_sec,
-                    "is_short": v.is_short or False,
-                    "category_id": v.category_id,
-                    "live_broadcast": v.live_broadcast,
-                    "tags": v.tags,
-                    "url": v.url or f"https://www.youtube.com/watch?v={v.video_id}",
-                    "created_at": now,
-                    "updated_at": now,
-                })
+            # 5. Query complete list of videos from database for final return
+            db_all_videos = db.query(VideoModel).filter(VideoModel.channel_id == channel_id).order_by(VideoModel.published_at.desc()).all()
+            all_videos = [db_to_video(v, channel_title) for v in db_all_videos]
 
-            if video_records:
-                stmt = pg_insert(VideoModel).values(video_records)
-                update_cols = {
-                    col.name: col
-                    for col in stmt.excluded
-                    if col.name not in ("video_id", "created_at")
-                }
-                upsert_stmt = stmt.on_conflict_do_update(
-                    index_elements=["video_id"],
-                    set_=update_cols
-                )
-                db.execute(upsert_stmt)
+            logger.info(f"Done! Returning {len(all_videos)} Video objects from PostgreSQL.")
+            if return_detailed:
+                return all_videos, len(new_videos), len(cached_videos)
+            return all_videos
 
-            if creator_record:
-                creator_record.video_count = db.query(VideoModel).filter(VideoModel.channel_id == channel_id).count()
-                creator_record.last_synced_at = now
-
-            db.commit()
-            logger.info(f"      Saved {len(new_videos)} videos to PostgreSQL database")
-
-        # 5. Query complete list of videos from database for final return
-        db_all_videos = db.query(VideoModel).filter(VideoModel.channel_id == channel_id).order_by(VideoModel.published_at.desc()).all()
-        all_videos = [db_to_video(v, channel_title) for v in db_all_videos]
-
-        logger.info(f"Done! Returning {len(all_videos)} Video objects from PostgreSQL.")
-        if return_detailed:
-            return all_videos, len(new_videos), len(cached_videos)
-        return all_videos
-
-    except Exception as e:
-        if db:
-            db.rollback()
-        logger.error(f"Error in fetch_channel_videos for channel {channel_id}: {e}")
-        raise e
-    finally:
-        if close_db:
-            db.close()
+        except Exception as e:
+            if db:
+                db.rollback()
+            logger.error(f"Error in fetch_channel_videos for channel {channel_id}: {e}")
+            raise e
+        finally:
+            if close_db:
+                db.close()
