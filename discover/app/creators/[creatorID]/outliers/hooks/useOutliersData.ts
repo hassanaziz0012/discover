@@ -36,7 +36,12 @@ export function useOutliersData(creatorID: string): UseOutliersDataResult {
   // Dynamic Query Parameter States (passed to backend API)
   const [daysBoost, setDaysBoost] = useState<string>("30"); // Recency boost time-frame cutoff (default 30 days)
   const [limit, setLimit] = useState<string>("all"); // Max videos retrieved from YouTube API
-  const [excludeShorts, setExcludeShorts] = useState<boolean>(false);
+  const [excludeShorts, setExcludeShorts] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("creator_excludeShorts") === "true";
+    }
+    return false;
+  });
 
   // Client-side Filter States (applied locally to the fetched results)
   const [searchQuery, setSearchQuery] = useState("");
@@ -45,14 +50,6 @@ export function useOutliersData(creatorID: string): UseOutliersDataResult {
 
   // Clipboard copy feedback
   const [isCopied, setIsCopied] = useState(false);
-
-  // Sync saved excludeShorts filter on client mount
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("creator_excludeShorts");
-      if (saved) setExcludeShorts(saved === "true");
-    }
-  }, []);
 
   const handleSetExcludeShorts = (val: boolean) => {
     setExcludeShorts(val);
