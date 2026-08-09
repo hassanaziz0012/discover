@@ -159,6 +159,7 @@ export default function CreatorsPage() {
   const [refreshStatus, setRefreshStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [isRefreshModalOpen, setIsRefreshModalOpen] = useState(false);
   const [refreshReport, setRefreshReport] = useState<RefreshReport | null>(null);
+  const [refreshProgress, setRefreshProgress] = useState<{ current: number; total: number } | null>(null);
 
   // Sync Subscriptions States
   const [isSyncing, setIsSyncing] = useState(false);
@@ -208,38 +209,63 @@ export default function CreatorsPage() {
     if (isRefreshing) return;
     setIsRefreshing(true);
     setRefreshStatus(null);
+    setRefreshProgress(null);
+
     try {
-      const response = await fetch(`${API_BASE_URL}/api/youtube/refresh-creators`, {
-        method: "POST",
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (Array.isArray(data.creators)) {
-          setCreators(data.creators);
-        } else {
-          fetchCreators(1, true);
+      const eventSource = new EventSource(`${API_BASE_URL}/api/youtube/refresh-creators?batch_size=50`);
+
+      eventSource.addEventListener("progress", (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          setRefreshProgress({
+            current: data.channels_done,
+            total: data.total_channels,
+          });
+        } catch (err) {
+          console.error("Failed to parse progress event:", err);
         }
-        setRefreshReport({
-          message: data.message || "Successfully refreshed all channels.",
-          refreshed: data.refreshed || [],
-          errors: data.errors || [],
-        });
-        setIsRefreshModalOpen(true);
-      } else {
-        const errJson = await response.json().catch(() => ({}));
+      });
+
+      eventSource.addEventListener("complete", (event) => {
+        eventSource.close();
+        try {
+          const data = JSON.parse(event.data);
+          setRefreshReport({
+            message: data.message || "Successfully refreshed all channels.",
+            refreshed: data.refreshed || [],
+            errors: data.errors || [],
+          });
+          setIsRefreshModalOpen(true);
+          fetchCreators(1, true);
+        } catch (err) {
+          console.error("Failed to parse complete event:", err);
+          setRefreshStatus({
+            type: "error",
+            message: "Failed to parse refresh results.",
+          });
+        } finally {
+          setIsRefreshing(false);
+          setRefreshProgress(null);
+        }
+      });
+
+      eventSource.onerror = () => {
+        eventSource.close();
+        setIsRefreshing(false);
+        setRefreshProgress(null);
         setRefreshStatus({
           type: "error",
-          message: errJson.detail || `Failed to refresh channels (Server status: ${response.status})`,
+          message: "Connection to the refresh stream was lost. Please try again.",
         });
-      }
+      };
     } catch (err) {
       console.error("Refresh creators error:", err);
+      setIsRefreshing(false);
+      setRefreshProgress(null);
       setRefreshStatus({
         type: "error",
         message: "Unable to connect to the backend server. Please verify that the uvicorn server is running on port 8000.",
       });
-    } finally {
-      setIsRefreshing(false);
     }
   };
 
@@ -418,6 +444,7 @@ export default function CreatorsPage() {
             onDiscover={() => setIsDiscoverModalOpen(true)}
             refreshStatus={refreshStatus}
             setRefreshStatus={setRefreshStatus}
+            refreshProgress={refreshProgress}
             channelSearchQuery={channelSearchQuery}
             setChannelSearchQuery={setChannelSearchQuery}
           >

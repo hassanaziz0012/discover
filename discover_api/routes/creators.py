@@ -1,11 +1,13 @@
+import json
 import logging
 import os
 import asyncio
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from db.session import get_db
+from db.session import get_db, SessionLocal
 from db.models import Creator as CreatorModel
 from youtube.fetch_videos import fetch_channel_videos, video_to_dict
 from youtube.utils import get_youtube_client, resolve_channel_id
@@ -111,79 +113,133 @@ async def get_creators_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to fetch creators: {e}")
 
 
-@router.post("/refresh-creators")
-async def refresh_creators(db: Session = Depends(get_db)):
+@router.get("/refresh-creators")
+async def refresh_creators(
+    batch_size: int = Query(50, ge=1, le=200, description="Number of creators to refresh per batch"),
+):
     """
     Refresh all YouTube creators/channels stored in PostgreSQL by fetching
     any new uploads from the YouTube API for each channel.
+    Streams progress via Server-Sent Events (SSE) in sequential batches.
     """
-    try:
-        api_key = os.getenv("YOUTUBE_API_KEY")
-        if not api_key:
-            raise HTTPException(status_code=500, detail="YOUTUBE_API_KEY environment variable is not set.")
+    api_key = os.getenv("YOUTUBE_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="YOUTUBE_API_KEY environment variable is not set.")
 
-        # 1. Query all channel IDs from PostgreSQL
+    # Query all channel IDs upfront before starting the generator
+    db = SessionLocal()
+    try:
         creator_records = db.query(CreatorModel).all()
         channel_ids = [c.channel_id for c in creator_records]
-        
-        if not channel_ids:
-            return {
+    finally:
+        db.close()
+
+    if not channel_ids:
+        async def empty_stream():
+            event = {
+                "type": "complete",
                 "message": "No creators to refresh.",
                 "refreshed": [],
                 "errors": [],
-                "creators": []
+                "channels_done": 0,
+                "total_channels": 0,
             }
+            yield f"event: complete\ndata: {json.dumps(event)}\n\n"
+        return StreamingResponse(empty_stream(), media_type="text/event-stream")
 
-        # 2. Define a helper to refresh a single channel asynchronously
-        async def refresh_single_channel(cid: str):
+    total_channels = len(channel_ids)
+    batches = [channel_ids[i : i + batch_size] for i in range(0, total_channels, batch_size)]
+    total_batches = len(batches)
+
+    async def event_stream():
+        all_refreshed = []
+        all_errors = []
+        channels_done = 0
+
+        for batch_idx, batch_ids in enumerate(batches):
+            batch_refreshed = []
+            batch_errors = []
+
+            sem = asyncio.Semaphore(5)
+
+            async def refresh_single(cid: str):
+                async with sem:
+                    try:
+                        _videos, new_count, cached_count = await asyncio.to_thread(
+                            fetch_channel_videos, api_key, cid, False, True
+                        )
+                        return cid, new_count, cached_count, None
+                    except Exception as ex:
+                        logger.error(f"Error refreshing channel {cid}: {ex}", exc_info=True)
+                        return cid, 0, 0, str(ex)
+
+            tasks = [refresh_single(cid) for cid in batch_ids]
+            results = await asyncio.gather(*tasks)
+
+            # Look up creator metadata for this batch
+            batch_db = SessionLocal()
             try:
-                # fresh=False to skip already existing videos and only retrieve new uploads
-                videos, new_count, cached_count = await asyncio.to_thread(
-                    fetch_channel_videos, api_key, cid, False, True
-                )
-                return cid, new_count, cached_count, None
-            except Exception as ex:
-                logger.error(f"Error refreshing channel {cid}: {ex}", exc_info=True)
-                return cid, 0, 0, str(ex)
+                batch_creators = batch_db.query(CreatorModel).filter(
+                    CreatorModel.channel_id.in_(batch_ids)
+                ).all()
+                creators_by_id = {c.channel_id: c for c in batch_creators}
+            finally:
+                batch_db.close()
 
-        # 3. Refresh each channel concurrently using thread pool
-        tasks = [refresh_single_channel(cid) for cid in channel_ids]
-        results = await asyncio.gather(*tasks)
+            for cid, new_count, cached_count, err in results:
+                if err:
+                    batch_errors.append({"channel_id": cid, "error": err})
+                else:
+                    creator = creators_by_id.get(cid)
+                    batch_refreshed.append({
+                        "channel_id": cid,
+                        "channel_name": creator.name if creator else "Unknown Channel",
+                        "thumbnail_url": creator.avatar_url or "" if creator else "",
+                        "new_videos_count": new_count,
+                        "cached_videos_count": cached_count,
+                    })
 
-        # 4. Load updated creators metadata from DB
-        creators_data = get_creators(db=db, page=1, limit=50)
-        updated_creators = creators_data["creators"]
-        creators_by_id = {c["channel_id"]: c for c in updated_creators}
+            all_refreshed.extend(batch_refreshed)
+            all_errors.extend(batch_errors)
+            channels_done += len(batch_ids)
 
-        refreshed_list = []
-        errors = []
-        for cid, new_count, cached_count, err in results:
-            if err:
-                errors.append({"channel_id": cid, "error": err})
-            else:
-                creator_meta = creators_by_id.get(cid, {})
-                refreshed_list.append({
-                    "channel_id": cid,
-                    "channel_name": creator_meta.get("name") or "Unknown Channel",
-                    "thumbnail_url": creator_meta.get("thumbnail_url") or "",
-                    "new_videos_count": new_count,
-                    "cached_videos_count": cached_count
-                })
+            # Send progress event
+            progress_event = {
+                "type": "progress",
+                "batch_index": batch_idx + 1,
+                "total_batches": total_batches,
+                "channels_done": channels_done,
+                "total_channels": total_channels,
+                "batch_refreshed": batch_refreshed,
+                "batch_errors": batch_errors,
+            }
+            yield f"event: progress\ndata: {json.dumps(progress_event)}\n\n"
 
-        status_msg = f"Successfully refreshed {len(refreshed_list)} channels."
-        if errors:
-            status_msg += f" {len(errors)} channels failed to refresh."
+        # Send final complete event
+        status_msg = f"Successfully refreshed {len(all_refreshed)} channels."
+        if all_errors:
+            status_msg += f" {len(all_errors)} channels failed to refresh."
 
-        return {
+        complete_event = {
+            "type": "complete",
             "message": status_msg,
-            "refreshed": refreshed_list,
-            "errors": errors,
-            "creators": updated_creators
+            "refreshed": all_refreshed,
+            "errors": all_errors,
+            "channels_done": channels_done,
+            "total_channels": total_channels,
         }
+        yield f"event: complete\ndata: {json.dumps(complete_event)}\n\n"
 
-    except Exception as e:
-        logger.error(f"Unexpected error in refresh-creators: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
 
 
 @router.post("/sync-subscriptions")

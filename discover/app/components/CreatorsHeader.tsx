@@ -1,6 +1,11 @@
 import React from "react";
 import ExpandableSearchBar from "./ExpandableSearchBar";
 
+export interface RefreshProgress {
+  current: number;
+  total: number;
+}
+
 export interface CreatorsHeaderProps {
   creatorsLayout: "list" | "grid";
   setCreatorsLayout: (layout: "list" | "grid") => void;
@@ -11,6 +16,7 @@ export interface CreatorsHeaderProps {
   onDiscover?: () => void;
   refreshStatus: { type: "success" | "error"; message: string } | null;
   setRefreshStatus: (status: { type: "success" | "error"; message: string } | null) => void;
+  refreshProgress?: RefreshProgress | null;
   channelSearchQuery?: string;
   setChannelSearchQuery?: (query: string) => void;
   children?: React.ReactNode;
@@ -26,6 +32,7 @@ export default function CreatorsHeader({
   onDiscover,
   refreshStatus,
   setRefreshStatus,
+  refreshProgress = null,
   channelSearchQuery = "",
   setChannelSearchQuery = () => {},
   children,
@@ -160,6 +167,35 @@ export default function CreatorsHeader({
           )}
         </div>
       </div>
+
+      {/* Refresh Progress Bar */}
+      {isRefreshing && refreshProgress && refreshProgress.total > 0 && (
+        <div className="flex flex-col gap-1.5 px-1 animate-fade-in">
+          <div className="flex items-center justify-between text-xs font-semibold">
+            <span className="text-primary flex items-center gap-1.5">
+              <svg
+                className="w-3.5 h-3.5 animate-spin text-brand"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+              >
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+              </svg>
+              Refreshing {refreshProgress.current} / {refreshProgress.total} creators…
+            </span>
+            <span className="text-secondary tabular-nums">
+              {Math.round((refreshProgress.current / refreshProgress.total) * 100)}%
+            </span>
+          </div>
+          <div className="w-full h-2 bg-surface-raised border border-border-subtle rounded-full overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-brand to-brand-hover rounded-full transition-all duration-500 ease-out"
+              style={{ width: `${(refreshProgress.current / refreshProgress.total) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {refreshStatus && (
         <div
