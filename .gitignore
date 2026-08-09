@@ -19,3 +19,4 @@ discover_api/youtube/cache/
 
 # secrets
 .env
+discover_api/.env

@@ -39,7 +39,7 @@ is_port_in_use() {
 }
 
 # Check port conflicts
-echo -e "${BLUE}[System] Checking port conflicts...${NC}"
+echo -e "${BLUE}[System] Checking port conflicts & services...${NC}"
 FRONTEND_IN_USE=false
 BACKEND_IN_USE=false
 
@@ -56,6 +56,21 @@ fi
 if [ "$FRONTEND_IN_USE" = true ] || [ "$BACKEND_IN_USE" = true ]; then
     echo -e "${RED}[Error] Cannot start services due to port conflicts. Please free up the ports and try again.${NC}"
     exit 1
+fi
+
+# Ensure PostgreSQL database container is running
+DB_PORT=5432
+if is_port_in_use $DB_PORT; then
+    echo -e "${GREEN}[System] Database: PostgreSQL is running on port 5432.${NC}"
+else
+    echo -e "${YELLOW}[System] Database: Port 5432 is inactive. Starting PostgreSQL database container via Docker...${NC}"
+    if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+        docker compose up -d db
+    elif command -v docker-compose >/dev/null 2>&1; then
+        docker-compose up -d db
+    else
+        echo -e "${RED}[Warning] Docker is not detected. Please start PostgreSQL manually on port 5432.${NC}"
+    fi
 fi
 
 echo -e "${GREEN}[System] Ports are clear. Detecting runners...${NC}"
