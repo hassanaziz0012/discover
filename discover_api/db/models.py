@@ -5,6 +5,7 @@ from sqlalchemy import (
     Text,
     BigInteger,
     Integer,
+    Float,
     Boolean,
     DateTime,
     ForeignKey,
@@ -28,6 +29,8 @@ class Creator(Base):
     description = Column(Text, nullable=True)
     subscriber_count = Column(BigInteger, default=0)
     video_count = Column(Integer, default=0)
+    avg_views = Column(Float, default=0.0)
+    avg_likes = Column(Float, default=0.0)
     last_synced_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
@@ -55,6 +58,10 @@ class Video(Base):
     comment_count = Column(Integer, default=0)
     duration = Column(Integer, default=0)  # In seconds
     is_short = Column(Boolean, default=False)
+    outlier_score = Column(Float, default=0.0)
+    base_score = Column(Float, default=0.0)
+    view_ratio = Column(Float, default=0.0)
+    like_ratio = Column(Float, default=0.0)
     category_id = Column(String(32), nullable=True)
     live_broadcast = Column(String(32), nullable=True)
     tags = Column(ARRAY(Text), nullable=True)
@@ -69,6 +76,8 @@ class Video(Base):
         Index("idx_videos_published_at", published_at.desc()),
         Index("idx_videos_view_count", view_count.desc()),
         Index("idx_videos_is_short", "is_short"),
+        Index("idx_videos_outlier_score", outlier_score.desc()),
+        Index("idx_videos_score_published", outlier_score.desc(), published_at.desc()),
     )
 
 
