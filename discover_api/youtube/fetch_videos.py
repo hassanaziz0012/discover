@@ -204,7 +204,11 @@ def get_uploads_playlist_id(youtube, channel_id: str) -> str:
     """
     Retrieve the 'uploads' playlist ID for a channel.
     Every channel has a hidden playlist that contains all its public videos.
+    Fast path: Standard YouTube channel IDs starting with 'UC' translate deterministically to 'UU'.
     """
+    if channel_id.startswith("UC") and len(channel_id) == 24:
+        return "UU" + channel_id[2:]
+
     response = youtube.channels().list(
         part="contentDetails",
         id=channel_id,
