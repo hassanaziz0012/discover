@@ -31,6 +31,7 @@ class Creator(Base):
     video_count = Column(Integer, default=0)
     avg_views = Column(Float, default=0.0)
     avg_likes = Column(Float, default=0.0)
+    backfill_completed = Column(Boolean, default=False, nullable=False)
     last_synced_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

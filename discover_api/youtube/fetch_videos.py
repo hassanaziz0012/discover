@@ -445,12 +445,13 @@ def fetch_channel_videos(
             db_videos = db.query(VideoModel).filter(VideoModel.channel_id == channel_id).order_by(VideoModel.published_at.desc()).all()
             creator_record = db.query(CreatorModel).filter(CreatorModel.channel_id == channel_id).first()
             channel_title = creator_record.name if creator_record else ""
+            backfill_completed = (creator_record.backfill_completed if (creator_record and creator_record.backfill_completed is not None) else False) if not fresh else False
 
             cached_videos = [db_to_video(v, channel_title) for v in db_videos] if not fresh else []
             cached_ids = {v.video_id for v in cached_videos}
             
             if cached_videos:
-                logger.info(f"      Fetched {len(cached_videos)} videos from PostgreSQL database")
+                logger.info(f"      Fetched {len(cached_videos)} videos from PostgreSQL database (backfill_completed={backfill_completed})")
 
             youtube = get_youtube_client(api_key)
 
@@ -519,6 +520,7 @@ def fetch_channel_videos(
                         "name": creator_name,
                         "subscriber_count": 0,
                         "video_count": 0,
+                        "backfill_completed": False,
                         "last_synced_at": now,
                         "created_at": now,
                         "updated_at": now
@@ -606,9 +608,12 @@ def fetch_channel_videos(
                     page_vids = []
                     for item in items:
                         vid = item["contentDetails"]["videoId"]
-                        if not fresh and cached_ids and vid in cached_ids:
+                        if not fresh and backfill_completed and cached_ids and vid in cached_ids:
                             hit_cache = True
                             break
+                        if cached_ids and vid in cached_ids:
+                            # Already in DB from a previous partial fetch; skip detail fetch
+                            continue
                         page_vids.append(vid)
                         new_video_ids.append(vid)
 
@@ -663,6 +668,14 @@ def fetch_channel_videos(
                         _save_pending(pending_videos)
 
                     logger.info(f"      Fetched {len(new_videos)} detailed video objects from API")
+
+            # Update creator record: if backfill was completed without hitting quota limits or early cache exit, mark backfill_completed = True
+            if not creator_record:
+                creator_record = db.query(CreatorModel).filter(CreatorModel.channel_id == channel_id).first()
+
+            if not quota_exceeded and not hit_cache and creator_record:
+                creator_record.backfill_completed = True
+                db.commit()
 
             # Update creator video count, baseline averages, outlier scores, and sync timestamp after saves
             if (new_videos or fresh or not creator_record or creator_record.avg_views is None) and creator_record:

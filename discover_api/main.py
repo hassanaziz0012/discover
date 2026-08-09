@@ -116,7 +116,11 @@ async def startup_event():
     try:
         from db.session import engine
         from db.models import Base
+        from sqlalchemy import text
         Base.metadata.create_all(bind=engine)
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE creators ADD COLUMN IF NOT EXISTS backfill_completed BOOLEAN DEFAULT FALSE NOT NULL;"))
+            conn.commit()
         logger.info("Database schemas & tables verified.")
     except Exception as e:
         logger.error(f"Failed to initialize database tables on startup: {e}")
