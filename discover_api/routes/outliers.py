@@ -98,7 +98,7 @@ def get_all_outliers(
     applying sorting, filtering, preset criteria, and pagination.
     """
     try:
-        all_outliers = calculate_all_outliers(
+        paginated_outliers, total = calculate_all_outliers(
             days=days,
             search=search,
             min_outlier=min_outlier,
@@ -107,15 +107,12 @@ def get_all_outliers(
             exclude_shorts=exclude_shorts,
             list_id=list_id,
             preset=preset,
+            page=page,
+            limit=limit,
             db=db
         )
 
-        total = len(all_outliers)
-        start_idx = (page - 1) * limit
-        end_idx = start_idx + limit
-
-        paginated_outliers = all_outliers[start_idx:end_idx]
-        has_more = end_idx < total
+        has_more = (page * limit) < total
 
         return {
             "videos": paginated_outliers,

@@ -167,15 +167,18 @@ def calculate_all_outliers(
     exclude_shorts: bool = False,
     list_id: Optional[str] = None,
     preset: Optional[str] = None,
+    page: Optional[int] = None,
+    limit: Optional[int] = None,
     db: Optional[Session] = None,
-) -> list:
+):
     """
-    Retrieves aggregated outliers from PostgreSQL database,
-    applying sorting, filtering, preset criteria, and scoring.
+    Retrieves aggregated outliers from PostgreSQL database using SQL pushdown
+    for sorting, filtering, preset criteria, and pagination.
     """
-    from sqlalchemy.orm import selectinload
+    from datetime import timedelta
     from db.session import SessionLocal
-    from db.models import Creator as CreatorModel, Video as VideoModel, UserList, ListCreator
+    from db.models import Creator as CreatorModel, Video as VideoModel, UserList
+    from sqlalchemy import func
 
     close_db = False
     if db is None:
@@ -183,139 +186,73 @@ def calculate_all_outliers(
         close_db = True
 
     try:
-        # Determine channel filtering if list_id is provided
-        target_channel_ids = None
+        # Base query joining Video and Creator
+        query = db.query(VideoModel, CreatorModel).join(
+            CreatorModel, VideoModel.channel_id == CreatorModel.channel_id
+        )
+
+        # 1. Channel List Filter (list_id)
         if list_id:
             user_list = db.query(UserList).filter((UserList.id == list_id) | (UserList.name == list_id)).first()
             if user_list:
-                target_channel_ids = {lc.channel_id for lc in user_list.creators}
+                target_channel_ids = [lc.channel_id for lc in user_list.creators]
+                if target_channel_ids:
+                    query = query.filter(VideoModel.channel_id.in_(target_channel_ids))
+                else:
+                    return ([], 0) if (page is not None and limit is not None) else []
             else:
-                return []
+                return ([], 0) if (page is not None and limit is not None) else []
 
-        # Query creators
-        creator_query = db.query(CreatorModel).options(selectinload(CreatorModel.videos))
-        if target_channel_ids is not None:
-            creator_query = creator_query.filter(CreatorModel.channel_id.in_(target_channel_ids))
+        # 2. Exclude Shorts Filter
+        if exclude_shorts:
+            query = query.filter(VideoModel.is_short.is_(False))
 
-        # Push creator subscriber_count filtering to SQL if preset requires it
-        if preset:
-            p_lower = preset.lower()
-            if p_lower == "breakouts":
-                creator_query = creator_query.filter(CreatorModel.subscriber_count <= 50000)
-            elif p_lower == "hidden_gems":
-                creator_query = creator_query.filter(CreatorModel.subscriber_count <= 20000)
-            elif p_lower == "proven_at_scale":
-                creator_query = creator_query.filter(
-                    CreatorModel.subscriber_count >= 100000,
-                    CreatorModel.subscriber_count <= 1000000
-                )
-        
-        creators = creator_query.all()
-        all_outliers = []
+        # 3. Search Filter (Title or Creator Name)
+        if search and search.strip():
+            s_pattern = f"%{search.strip().lower()}%"
+            query = query.filter(
+                (func.lower(VideoModel.title).like(s_pattern)) | 
+                (func.lower(CreatorModel.name).like(s_pattern))
+            )
+
         now = datetime.now(timezone.utc)
 
-        for creator in creators:
-            videos = creator.videos
-            if not videos:
-                continue
-
-            valid_views_videos = [v for v in videos if v.view_count is not None]
-            valid_likes_videos = [v for v in videos if v.like_count is not None]
-
-            avg_views = sum(v.view_count for v in valid_views_videos) / len(valid_views_videos) if valid_views_videos else 0.0
-            avg_likes = sum(v.like_count for v in valid_likes_videos) / len(valid_likes_videos) if valid_likes_videos else 0.0
-
-            for v in videos:
-                if exclude_shorts and v.is_short:
-                    continue
-
-                view_ratio = v.view_count / avg_views if (v.view_count is not None and avg_views > 0) else 0.0
-                like_ratio = v.like_count / avg_likes if (v.like_count is not None and avg_likes > 0) else 0.0
-
-                ratios = []
-                if v.view_count is not None and avg_views > 0:
-                    ratios.append(view_ratio)
-                if v.like_count is not None and avg_likes > 0:
-                    ratios.append(like_ratio)
-
-                base_score = sum(ratios) / len(ratios) if ratios else 0.0
-
-                is_boosted = False
-                age_in_days = (now - v.published_at).total_seconds() / 86400.0
-
-                score = base_score
-                if days is not None:
-                    if age_in_days <= days:
-                        score = base_score * 1.10
-                        is_boosted = True
-
-                video_item = {
-                    "video_id": v.video_id,
-                    "title": v.title,
-                    "description": v.description or "",
-                    "published_at": v.published_at.isoformat(),
-                    "thumbnail_url": v.thumbnail_url or "",
-                    "view_count": v.view_count,
-                    "like_count": v.like_count,
-                    "comment_count": v.comment_count,
-                    "duration": format_iso8601_duration(v.duration),
-                    "url": v.url or f"https://www.youtube.com/watch?v={v.video_id}",
-                    "score": round(score, 4),
-                    "base_score": round(base_score, 4),
-                    "view_ratio": round(view_ratio, 4),
-                    "like_ratio": round(like_ratio, 4),
-                    "view_diff": int(v.view_count - avg_views) if v.view_count is not None else 0,
-                    "like_diff": int(v.like_count - avg_likes) if v.like_count is not None else 0,
-                    "age_in_days": round(age_in_days, 2),
-                    "is_boosted": is_boosted,
-                    "is_short": v.is_short,
-                    "channel_id": creator.channel_id,
-                    "channel_name": creator.name,
-                    "channel_avatar": creator.avatar_url,
-                    "subscriber_count": creator.subscriber_count or 0,
-                }
-                all_outliers.append(video_item)
-
-        # Apply search filter
-        if search:
-            s_query = search.lower().strip()
-            all_outliers = [
-                item for item in all_outliers
-                if s_query in item["title"].lower() or s_query in item["channel_name"].lower()
-            ]
-
-        # Apply Preset Filters
+        # 4. Preset Filters
         if preset:
             p = preset.lower()
             if p == "breakouts":
-                all_outliers = [
-                    item for item in all_outliers
-                    if item.get("subscriber_count", 0) <= 50000 and item["score"] >= 5.0 and item["age_in_days"] <= 180
-                ]
+                cutoff = now - timedelta(days=180)
+                query = query.filter(
+                    CreatorModel.subscriber_count <= 50000,
+                    VideoModel.outlier_score >= 5.0,
+                    VideoModel.published_at >= cutoff
+                )
             elif p == "hidden_gems":
-                all_outliers = [
-                    item for item in all_outliers
-                    if item.get("subscriber_count", 0) <= 20000 and item["score"] >= 10.0
-                ]
+                query = query.filter(
+                    CreatorModel.subscriber_count <= 20000,
+                    VideoModel.outlier_score >= 10.0
+                )
             elif p == "proven_at_scale":
-                all_outliers = [
-                    item for item in all_outliers
-                    if 100000 <= item.get("subscriber_count", 0) <= 1000000 and item["score"] >= 2.0
-                ]
+                query = query.filter(
+                    CreatorModel.subscriber_count >= 100000,
+                    CreatorModel.subscriber_count <= 1000000,
+                    VideoModel.outlier_score >= 2.0
+                )
             elif p == "viral_now":
-                all_outliers = [
-                    item for item in all_outliers
-                    if item["age_in_days"] <= 30 and item["score"] >= 3.0 and ((item.get("view_count") or 0) >= 50000 or (item.get("like_count") or 0) >= 500)
-                ]
+                cutoff = now - timedelta(days=30)
+                query = query.filter(
+                    VideoModel.published_at >= cutoff,
+                    VideoModel.outlier_score >= 3.0,
+                    (VideoModel.view_count >= 50000) | (VideoModel.like_count >= 500)
+                )
             elif p == "all_time_greats":
-                # All-time greats doesn't enforce time_range cutoff
                 time_range = "all"
 
-        # Apply min_outlier filter (only if preset is not set or if specified)
+        # 5. Min Outlier Filter
         if min_outlier is not None and not preset:
-            all_outliers = [item for item in all_outliers if item["score"] >= min_outlier]
+            query = query.filter(VideoModel.outlier_score >= min_outlier)
 
-        # Apply time_range cutoff
+        # 6. Time Range Cutoff
         if time_range and time_range != "all" and not (preset and preset.lower() == "all_time_greats"):
             days_cutoff = None
             if time_range == "weekly":
@@ -328,17 +265,71 @@ def calculate_all_outliers(
                 days_cutoff = 180
 
             if days_cutoff is not None:
-                all_outliers = [item for item in all_outliers if item["age_in_days"] <= days_cutoff]
+                cutoff_date = now - timedelta(days=days_cutoff)
+                query = query.filter(VideoModel.published_at >= cutoff_date)
 
-        # Apply Sort
+        # Total count before pagination using lightweight scalar count
+        total_count = query.with_entities(func.count(VideoModel.video_id)).order_by(None).scalar() or 0
+
+        # 7. Sorting
         if sort_by == "views":
-            all_outliers.sort(key=lambda x: x["view_count"] if x["view_count"] is not None else 0, reverse=True)
+            query = query.order_by(VideoModel.view_count.desc())
         elif sort_by == "newest":
-            all_outliers.sort(key=lambda x: x["published_at"], reverse=True)
+            query = query.order_by(VideoModel.published_at.desc())
         else:  # default outlierScore / score
-            all_outliers.sort(key=lambda x: x["score"], reverse=True)
+            query = query.order_by(VideoModel.outlier_score.desc(), VideoModel.published_at.desc())
 
-        return all_outliers
+        # 8. SQL Pagination
+        if page is not None and limit is not None:
+            offset_val = (page - 1) * limit
+            query = query.offset(offset_val).limit(limit)
+
+        records = query.all()
+
+        # Build return dictionaries for selected page rows
+        outlier_items = []
+        for v, creator in records:
+            avg_views = creator.avg_views or 0.0
+            avg_likes = creator.avg_likes or 0.0
+            age_in_days = (now - v.published_at).total_seconds() / 86400.0
+
+            base_score = v.base_score if v.base_score is not None else 0.0
+            score = base_score
+            is_boosted = False
+
+            if days is not None and age_in_days <= days:
+                score = base_score * 1.10
+                is_boosted = True
+
+            outlier_items.append({
+                "video_id": v.video_id,
+                "title": v.title,
+                "description": v.description or "",
+                "published_at": v.published_at.isoformat(),
+                "thumbnail_url": v.thumbnail_url or "",
+                "view_count": v.view_count,
+                "like_count": v.like_count,
+                "comment_count": v.comment_count,
+                "duration": format_iso8601_duration(v.duration),
+                "url": v.url or f"https://www.youtube.com/watch?v={v.video_id}",
+                "score": round(score, 4),
+                "base_score": round(base_score, 4),
+                "view_ratio": round(v.view_ratio or 0.0, 4),
+                "like_ratio": round(v.like_ratio or 0.0, 4),
+                "view_diff": int(v.view_count - avg_views) if v.view_count is not None else 0,
+                "like_diff": int(v.like_count - avg_likes) if v.like_count is not None else 0,
+                "age_in_days": round(age_in_days, 2),
+                "is_boosted": is_boosted,
+                "is_short": v.is_short,
+                "channel_id": creator.channel_id,
+                "channel_name": creator.name,
+                "channel_avatar": creator.avatar_url,
+                "subscriber_count": creator.subscriber_count or 0,
+            })
+
+        if page is not None and limit is not None:
+            return outlier_items, total_count
+        return outlier_items
     finally:
         if close_db:
             db.close()
