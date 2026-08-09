@@ -72,6 +72,23 @@ app.add_middleware(
 )
 
 
+# --- PROFILER CONFIGURATION ---
+enable_profiler = os.getenv("ENABLE_PROFILER", "true").lower() in ("true", "1", "yes")
+if enable_profiler:
+    try:
+        from fastapi_profiler import PyInstrumentProfilerMiddleware
+
+        app.add_middleware(
+            PyInstrumentProfilerMiddleware,
+            server_app=app,
+            enable_dashboard=True,
+        )
+        logger.info("FastAPI Profiler middleware enabled (Dashboard available at /__profiler__).")
+    except Exception as e:
+        logger.error(f"Failed to initialize PyInstrumentProfilerMiddleware: {e}")
+
+
+
 # --- APPLICATION EVENTS ---
 @app.on_event("startup")
 async def startup_event():
