@@ -72,6 +72,19 @@ app.add_middleware(
 )
 
 
+import time
+
+# --- PROCESS TIMING MIDDLEWARE ---
+@app.middleware("http")
+async def add_process_time_header(request, call_next):
+    start_time = time.perf_counter()
+    response = await call_next(request)
+    process_time_ms = (time.perf_counter() - start_time) * 1000
+    response.headers["X-Process-Time-Ms"] = f"{process_time_ms:.2f}"
+    response.headers["Server-Timing"] = f"total;dur={process_time_ms:.2f}"
+    return response
+
+
 # --- PROFILER CONFIGURATION ---
 enable_profiler = os.getenv("ENABLE_PROFILER", "true").lower() in ("true", "1", "yes")
 if enable_profiler:
@@ -82,6 +95,11 @@ if enable_profiler:
             PyInstrumentProfilerMiddleware,
             server_app=app,
             enable_dashboard=True,
+            dashboard_path="/__profiler__",
+            filter_paths=["/__profiler__", "/docs", "/openapi.json", "/health", "/redoc"],
+            profiler_interval=0.001,       # 1ms sample rate (lightweight, prevents frame explosion)
+            max_profiles_per_route=5,      # Retain maximum 5 profiles per route in memory
+            is_print_each_request=False,
         )
         logger.info("FastAPI Profiler middleware enabled (Dashboard available at /__profiler__).")
     except Exception as e:
