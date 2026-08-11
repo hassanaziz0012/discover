@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from db.session import get_db, SessionLocal
 from db.models import Creator as CreatorModel
 from youtube.fetch_videos import fetch_channel_videos, video_to_dict
-from youtube.utils import get_youtube_client, resolve_channel_id
+from youtube.utils import get_youtube_client, resolve_channel_id, get_api_key
 from youtube.search_creators import search_youtube_creators
 from youtube.creators import get_creators, delete_creator
 
@@ -36,7 +36,7 @@ def get_videos(
     Utilizes PostgreSQL database for persistence and retrieval.
     """
     try:
-        api_key = os.getenv("YOUTUBE_API_KEY")
+        api_key = get_api_key()
         target_channel = channel or os.getenv("YOUTUBE_CHANNEL_ID")
         
         if not api_key:
@@ -80,7 +80,7 @@ async def search_creators(
         }
 
     try:
-        api_key = os.getenv("YOUTUBE_API_KEY")
+        api_key = get_api_key()
         if not api_key:
             raise HTTPException(status_code=500, detail="YOUTUBE_API_KEY environment variable is not set.")
 
@@ -122,7 +122,7 @@ async def refresh_creators(
     any new uploads from the YouTube API for each channel.
     Streams progress via Server-Sent Events (SSE) in sequential batches.
     """
-    api_key = os.getenv("YOUTUBE_API_KEY")
+    api_key = get_api_key()
     if not api_key:
         raise HTTPException(status_code=500, detail="YOUTUBE_API_KEY environment variable is not set.")
 
@@ -256,7 +256,7 @@ async def sync_subscriptions(
     fetches their videos and persists them.
     """
     try:
-        api_key = os.getenv("YOUTUBE_API_KEY")
+        api_key = get_api_key()
         target_channel = channel_id or os.getenv("YOUTUBE_CHANNEL_ID")
         
         if not api_key:

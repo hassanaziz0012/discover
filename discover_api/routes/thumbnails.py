@@ -67,7 +67,7 @@ def save_channel(channel_input: ChannelMetadata, db: Session = Depends(get_db)):
         
         # Automatically fetch the profile picture from YouTube if URL/handle is provided
         if channel_input.url:
-            api_key = os.getenv("YOUTUBE_API_KEY")
+            api_key = get_api_key()
             if api_key:
                 try:
                     youtube = get_youtube_client(api_key)

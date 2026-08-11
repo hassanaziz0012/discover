@@ -38,7 +38,8 @@ def main():
     print("      Automated Category & Regional Trending Crawler")
     print("=" * 65)
 
-    api_key = os.getenv("YOUTUBE_API_KEY")
+    from youtube.utils import get_api_key
+    api_key = get_api_key()
     if not api_key:
         print("❌ Error: YOUTUBE_API_KEY environment variable is not set.")
         sys.exit(1)

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from db.session import get_db
 from db.models import Creator as CreatorModel
+from youtube.utils import get_api_key
 from youtube.discover_top_creators import get_video_categories, discover_top_creators
 from youtube.fetch_videos import fetch_channel_videos
 from youtube.creators import get_creators
@@ -25,7 +26,7 @@ def list_video_categories(
     Return all assignable YouTube video categories for a given region.
     """
     try:
-        api_key = os.getenv("YOUTUBE_API_KEY")
+        api_key = get_api_key()
         if not api_key:
             raise HTTPException(status_code=500, detail="YOUTUBE_API_KEY environment variable is not set.")
 
@@ -51,7 +52,7 @@ def discover_creators_endpoint(
     Returns creator metadata with already_cached flags.
     """
     try:
-        api_key = os.getenv("YOUTUBE_API_KEY")
+        api_key = get_api_key()
         if not api_key:
             raise HTTPException(status_code=500, detail="YOUTUBE_API_KEY environment variable is not set.")
 
@@ -91,7 +92,7 @@ async def bulk_add_creators(request: BulkAddRequest, db: Session = Depends(get_d
         if not (len(cid) == 24 and cid.startswith("UC") and all(c.isalnum() or c in "-_" for c in cid)):
             raise HTTPException(status_code=400, detail=f"Invalid channel ID format: {cid}")
 
-    api_key = os.getenv("YOUTUBE_API_KEY")
+    api_key = get_api_key()
     if not api_key:
         raise HTTPException(status_code=500, detail="YOUTUBE_API_KEY environment variable is not set.")
 
