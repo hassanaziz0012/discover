@@ -10,6 +10,7 @@ from .fetch_videos import (
     get_uploads_playlist_id,
 )
 from .utils import (
+    get_api_key,
     get_youtube_client,
     resolve_channel_id,
     supports_color,
@@ -23,6 +24,7 @@ __all__ = [
     "fetch_channel_videos",
     "fetch_video_details",
     "get_uploads_playlist_id",
+    "get_api_key",
     "get_youtube_client",
     "resolve_channel_id",
     "supports_color",

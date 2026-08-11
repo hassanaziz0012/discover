@@ -9,6 +9,7 @@ import math
 import os
 import re
 import sys
+import threading
 from datetime import UTC, datetime
 from typing import Optional, Union
 
@@ -27,13 +28,53 @@ STOP_WORDS = {
 
 # ── Credential & Client Initialization ──────────────────────────────────────────
 
+_api_key_lock = threading.Lock()
+_api_key_request_count = 0
+
+
+def get_api_key(reqs_per_key: int = 500) -> Optional[str]:
+    """
+    Retrieve YouTube API key cycling through YOUTUBE_API_KEY_1, YOUTUBE_API_KEY_2, etc.
+    in environment variables every `reqs_per_key` (default 500) requests to avoid quota depletion.
+    Falls back to YOUTUBE_API_KEY if no numbered keys exist.
+    """
+    global _api_key_request_count
+    load_dotenv()
+
+    # Discover all matching YouTube API keys in environment
+    numbered_keys = []
+    for env_var, value in os.environ.items():
+        if value and value.strip():
+            match = re.fullmatch(r"YOUTUBE_API_KEY_(\d+)", env_var)
+            if match:
+                idx = int(match.group(1))
+                numbered_keys.append((idx, value.strip()))
+
+    if numbered_keys:
+        numbered_keys.sort(key=lambda item: item[0])
+        keys = [val for _, val in numbered_keys]
+    else:
+        single_key = os.getenv("YOUTUBE_API_KEY")
+        keys = [single_key.strip()] if single_key and single_key.strip() else []
+
+    if not keys:
+        return None
+
+    with _api_key_lock:
+        current_count = _api_key_request_count
+        _api_key_request_count += 1
+
+    key_index = (current_count // max(1, reqs_per_key)) % len(keys)
+    return keys[key_index]
+
+
 def get_youtube_client(api_key: Optional[str] = None):
     """
     Authenticate and return an active Google API YouTube Client resource.
-    Automatically reads YOUTUBE_API_KEY from environment variables if not provided.
+    Automatically cycles YOUTUBE_API_KEY from environment variables if not provided.
     """
     load_dotenv()
-    key = api_key or os.getenv("YOUTUBE_API_KEY")
+    key = api_key or get_api_key()
     if not key:
         raise EnvironmentError(
             "YOUTUBE_API_KEY environment variable or --api-key argument must be set."
