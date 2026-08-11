@@ -21,7 +21,7 @@ from googleapiclient.errors import HttpError
 from dotenv import load_dotenv
 
 from .models import Video
-from .utils import get_youtube_client, resolve_channel_id, format_iso8601_duration
+from .utils import get_api_key, get_youtube_client, resolve_channel_id, format_iso8601_duration
 
 # Configure standard logger
 logger = logging.getLogger("discover_api.youtube.fetch_videos")
@@ -29,7 +29,6 @@ logger = logging.getLogger("discover_api.youtube.fetch_videos")
 # ── Configuration ─────────────────────────────────────────────────────────────
 load_dotenv()
 
-API_KEY    = os.getenv("YOUTUBE_API_KEY")
 CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID")
 
 
@@ -41,7 +40,7 @@ def _get_thread_youtube_client(api_key: Optional[str] = None):
     Retrieve or initialize a thread-local YouTube API client resource.
     Guarantees thread-safety when executing API calls in concurrent worker threads.
     """
-    key = api_key or os.getenv("YOUTUBE_API_KEY")
+    key = api_key or get_api_key()
     if not hasattr(_thread_local, "client") or getattr(_thread_local, "api_key", None) != key:
         _thread_local.api_key = key
         _thread_local.client = get_youtube_client(key)

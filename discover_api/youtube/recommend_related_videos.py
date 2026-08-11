@@ -104,7 +104,7 @@ def get_related_recommendations(
     Computes weighted similarity scores against all channel inventory,
     and returns a sorted ranking list.
     """
-    target_api_key = api_key or os.getenv("YOUTUBE_API_KEY")
+    target_api_key = api_key or get_api_key()
     target_channel_id = channel_id or os.getenv("YOUTUBE_CHANNEL_ID")
 
     if not target_api_key or not target_channel_id:

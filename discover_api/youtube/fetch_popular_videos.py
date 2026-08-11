@@ -74,7 +74,7 @@ def get_popular_videos(
     Resolves the channel, pagination early-stopping via cutoff date, fetches stats,
     sorts descending, and returns a rank-ordered list.
     """
-    target_api_key = api_key or os.getenv("YOUTUBE_API_KEY")
+    target_api_key = api_key or get_api_key()
 
     # 1. Authenticate and Build API Client
     youtube = get_youtube_client(target_api_key)

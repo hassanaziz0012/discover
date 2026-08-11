@@ -9,7 +9,7 @@ import os
 import logging
 from typing import Optional, Dict, Any, List
 
-from .utils import get_youtube_client, parse_iso8601_duration, format_iso8601_duration
+from .utils import get_youtube_client, parse_iso8601_duration, format_iso8601_duration, get_api_key
 from .fetch_videos import _best_thumbnail, _parse_dt, ensure_shorts_classification
 
 logger = logging.getLogger("discover_api.youtube.search_live_videos")
@@ -39,7 +39,7 @@ def search_live_videos(
     :param region_code: Preferred ISO 3166-1 alpha-2 country code (e.g. 'US').
     :param api_key: YouTube API key.
     """
-    target_api_key = api_key or os.getenv("YOUTUBE_API_KEY")
+    target_api_key = api_key or get_api_key()
     if not target_api_key:
         raise ValueError("YOUTUBE_API_KEY environment variable is not set.")
 

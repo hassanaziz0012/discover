@@ -13,7 +13,7 @@ from typing import Optional
 
 from .models import Video
 from .fetch_videos import fetch_channel_videos
-from .utils import resolve_channel_id, get_youtube_client, format_iso8601_duration
+from .utils import resolve_channel_id, get_youtube_client, format_iso8601_duration, get_api_key
 
 logger = logging.getLogger("discover_api.youtube.fetch_outliers")
 
@@ -31,7 +31,7 @@ def calculate_outliers(
     averages, filters and scores outliers, applies optional recency boost, sorts the list,
     and returns a structured dictionary matching premium API specs.
     """
-    target_api_key = api_key or os.getenv("YOUTUBE_API_KEY")
+    target_api_key = api_key or get_api_key()
 
     # 1. Authenticate and Build API Client
     youtube = get_youtube_client(target_api_key)

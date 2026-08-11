@@ -10,7 +10,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
-from .utils import get_youtube_client
+from .utils import get_youtube_client, get_api_key
 
 logger = logging.getLogger("discover_api.youtube.discover_top_creators")
 
@@ -28,7 +28,7 @@ def get_video_categories(
     Returns:
         List of dicts with keys: id, title
     """
-    target_api_key = api_key or os.getenv("YOUTUBE_API_KEY")
+    target_api_key = api_key or get_api_key()
     youtube = get_youtube_client(target_api_key)
 
     response = youtube.videoCategories().list(
@@ -77,7 +77,7 @@ def discover_top_creators(
             channel_id, name, handle, thumbnail_url, description,
             subscriber_count, video_count, trending_video_count, already_cached
     """
-    target_api_key = api_key or os.getenv("YOUTUBE_API_KEY")
+    target_api_key = api_key or get_api_key()
     youtube = get_youtube_client(target_api_key)
 
     # ── Step 1: Fetch trending/popular videos ─────────────────────────────

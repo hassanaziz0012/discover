@@ -226,7 +226,7 @@ def analyze_video_comments_sentiment(video_id_or_url: str, limit: Optional[int] 
     Core sentiment analysis logic. Fetches metadata and comments, runs LangChain with Gemini structured outputs,
     and returns a structured dictionary of results.
     """
-    from youtube.utils import get_youtube_client
+    from youtube.utils import get_youtube_client, get_api_key
     from langchain_google_genai import ChatGoogleGenerativeAI
     from langchain_core.prompts import ChatPromptTemplate
     from pydantic import BaseModel, Field
@@ -236,7 +236,7 @@ def analyze_video_comments_sentiment(video_id_or_url: str, limit: Optional[int] 
     logger.info(f"Starting sentiment analysis operation for video: '{video_id_or_url}' (limit: {limit}, model: {model})")
 
     # 1. Verify Credentials
-    youtube_api_key = os.getenv("YOUTUBE_API_KEY")
+    youtube_api_key = get_api_key()
     if not youtube_api_key:
         raise ValueError("YOUTUBE_API_KEY is not set in environment variables.")
         
