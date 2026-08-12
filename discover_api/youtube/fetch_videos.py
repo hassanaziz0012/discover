@@ -350,7 +350,7 @@ def db_to_video(v: VideoModel, channel_title: str = "") -> Video:
         category_id=v.category_id,
         live_broadcast=v.live_broadcast,
         is_short=v.is_short or False,
-        url=v.url or f"https://www.youtube.com/watch?v={v.video_id}"
+        url=v.url
     )
 
 
@@ -554,7 +554,6 @@ def fetch_channel_videos(
                         "category_id": v.category_id,
                         "live_broadcast": v.live_broadcast,
                         "tags": v.tags,
-                        "url": v.url or f"https://www.youtube.com/watch?v={v.video_id}",
                         "created_at": now,
                         "updated_at": now,
                     })

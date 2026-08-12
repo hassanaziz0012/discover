@@ -66,7 +66,10 @@ class Video(Base):
     category_id = Column(String(32), nullable=True)
     live_broadcast = Column(String(32), nullable=True)
     tags = Column(ARRAY(Text), nullable=True)
-    url = Column(Text, nullable=True)
+    @property
+    def url(self) -> str:
+        return f"https://www.youtube.com/watch?v={self.video_id}"
+
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 

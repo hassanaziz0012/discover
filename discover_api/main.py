@@ -120,6 +120,7 @@ async def startup_event():
         Base.metadata.create_all(bind=engine)
         with engine.connect() as conn:
             conn.execute(text("ALTER TABLE creators ADD COLUMN IF NOT EXISTS backfill_completed BOOLEAN DEFAULT FALSE NOT NULL;"))
+            conn.execute(text("ALTER TABLE videos DROP COLUMN IF EXISTS url;"))
             conn.commit()
         logger.info("Database schemas & tables verified.")
     except Exception as e:

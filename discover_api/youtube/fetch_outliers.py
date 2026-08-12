@@ -311,7 +311,7 @@ def calculate_all_outliers(
                 "like_count": v.like_count,
                 "comment_count": v.comment_count,
                 "duration": format_iso8601_duration(v.duration),
-                "url": v.url or f"https://www.youtube.com/watch?v={v.video_id}",
+                "url": v.url,
                 "score": round(score, 4),
                 "base_score": round(base_score, 4),
                 "view_ratio": round(v.view_ratio or 0.0, 4),
