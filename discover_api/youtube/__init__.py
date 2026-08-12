@@ -14,6 +14,9 @@ from .utils import (
     get_youtube_client,
     resolve_channel_id,
     supports_color,
+    mark_api_key_exhausted,
+    is_api_key_exhausted,
+    reset_exhausted_keys,
 )
 from .search_creators import search_youtube_creators
 
@@ -28,6 +31,8 @@ __all__ = [
     "get_youtube_client",
     "resolve_channel_id",
     "supports_color",
+    "mark_api_key_exhausted",
+    "is_api_key_exhausted",
+    "reset_exhausted_keys",
     "search_youtube_creators",
 ]
-

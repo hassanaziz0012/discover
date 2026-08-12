@@ -21,7 +21,13 @@ from googleapiclient.errors import HttpError
 from dotenv import load_dotenv
 
 from .models import Video
-from .utils import get_api_key, get_youtube_client, resolve_channel_id, format_iso8601_duration
+from .utils import (
+    get_api_key,
+    get_youtube_client,
+    resolve_channel_id,
+    format_iso8601_duration,
+    mark_api_key_exhausted,
+)
 
 # Configure standard logger
 logger = logging.getLogger("discover_api.youtube.fetch_videos")
@@ -594,6 +600,7 @@ def fetch_channel_videos(
                         ).execute()
                     except HttpError as e:
                         if e.resp.status == 403 and b"quotaExceeded" in e.content:
+                            mark_api_key_exhausted(getattr(_thread_local, "api_key", None))
                             logger.warning(
                                 "YouTube API daily quota exceeded during playlist fetch. "
                                 "Saving all videos fetched so far and stopping."
@@ -647,6 +654,7 @@ def fetch_channel_videos(
                             pending_videos.extend(batch)
                         except HttpError as e:
                             if e.resp.status == 403 and b"quotaExceeded" in e.content:
+                                mark_api_key_exhausted(getattr(_thread_local, "api_key", None))
                                 logger.warning(
                                     "YouTube API quota exceeded during metadata fetch. "
                                     "Saving partial results and stopping."

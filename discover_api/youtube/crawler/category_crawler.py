@@ -30,7 +30,7 @@ else:
 
 from db.session import SessionLocal
 from db.models import Creator
-from youtube.utils import get_youtube_client
+from youtube.utils import get_youtube_client, mark_api_key_exhausted
 
 logger = logging.getLogger("discover_api.youtube.crawler.category_crawler")
 
@@ -45,6 +45,7 @@ def is_quota_exceeded_error(e: Exception) -> bool:
         if e.resp.status in (403, 429):
             error_str = str(e).lower()
             if "quota" in error_str or "rate" in error_str or "exceeded" in error_str:
+                mark_api_key_exhausted()
                 return True
     return False
 

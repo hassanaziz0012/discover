@@ -30,15 +30,45 @@ STOP_WORDS = {
 
 _api_key_lock = threading.Lock()
 _api_key_request_count = 0
+_exhausted_keys: set[str] = set()
+_last_returned_key: Optional[str] = None
+
+
+def mark_api_key_exhausted(api_key: Optional[str] = None) -> None:
+    """
+    Mark an API key as exhausted so it is removed from the active pool of keys.
+    If `api_key` is None, marks the last key returned by `get_api_key()`.
+    """
+    global _last_returned_key
+    with _api_key_lock:
+        target_key = api_key or _last_returned_key
+        if target_key:
+            _exhausted_keys.add(target_key)
+
+
+def is_api_key_exhausted(api_key: str) -> bool:
+    """Check if a specific API key has been marked as exhausted."""
+    with _api_key_lock:
+        return api_key in _exhausted_keys
+
+
+def reset_exhausted_keys() -> None:
+    """Reset the set of exhausted keys and reset state."""
+    global _api_key_request_count, _last_returned_key
+    with _api_key_lock:
+        _exhausted_keys.clear()
+        _api_key_request_count = 0
+        _last_returned_key = None
 
 
 def get_api_key(reqs_per_key: int = 500) -> Optional[str]:
     """
     Retrieve YouTube API key cycling through YOUTUBE_API_KEY_1, YOUTUBE_API_KEY_2, etc.
     in environment variables every `reqs_per_key` (default 500) requests to avoid quota depletion.
+    Excludes any keys that have been marked as exhausted.
     Falls back to YOUTUBE_API_KEY if no numbered keys exist.
     """
-    global _api_key_request_count
+    global _api_key_request_count, _last_returned_key
     load_dotenv()
 
     # Discover all matching YouTube API keys in environment
@@ -52,20 +82,25 @@ def get_api_key(reqs_per_key: int = 500) -> Optional[str]:
 
     if numbered_keys:
         numbered_keys.sort(key=lambda item: item[0])
-        keys = [val for _, val in numbered_keys]
+        candidate_keys = [val for _, val in numbered_keys]
     else:
         single_key = os.getenv("YOUTUBE_API_KEY")
-        keys = [single_key.strip()] if single_key and single_key.strip() else []
-
-    if not keys:
-        return None
+        candidate_keys = [single_key.strip()] if single_key and single_key.strip() else []
 
     with _api_key_lock:
+        active_keys = [k for k in candidate_keys if k not in _exhausted_keys]
+
+        if not active_keys:
+            _last_returned_key = None
+            return None
+
         current_count = _api_key_request_count
         _api_key_request_count += 1
 
-    key_index = (current_count // max(1, reqs_per_key)) % len(keys)
-    return keys[key_index]
+        key_index = (current_count // max(1, reqs_per_key)) % len(active_keys)
+        chosen_key = active_keys[key_index]
+        _last_returned_key = chosen_key
+        return chosen_key
 
 
 def get_youtube_client(api_key: Optional[str] = None):
