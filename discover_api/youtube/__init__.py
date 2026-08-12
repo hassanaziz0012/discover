@@ -19,6 +19,7 @@ from .utils import (
     reset_exhausted_keys,
 )
 from .search_creators import search_youtube_creators
+from .creators import get_creators, delete_creator, add_creators_metadata
 
 __all__ = [
     "Video",
@@ -35,4 +36,7 @@ __all__ = [
     "is_api_key_exhausted",
     "reset_exhausted_keys",
     "search_youtube_creators",
+    "get_creators",
+    "delete_creator",
+    "add_creators_metadata",
 ]

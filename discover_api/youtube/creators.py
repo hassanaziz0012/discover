@@ -7,7 +7,7 @@ Enriches channel metadata using the YouTube Data API and updates database record
 
 import logging
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -153,3 +153,84 @@ def delete_creator(channel_id: str, db: Optional[Session] = None) -> bool:
     finally:
         if close_db:
             db.close()
+
+
+def add_creators_metadata(
+    api_key: str,
+    channel_ids: List[str],
+    db: Session
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Fetch channel metadata (snippet and statistics) from YouTube Data API in batches
+    and save/upsert Creator records in PostgreSQL DB without fetching their videos.
+
+    Returns:
+        Tuple of (added_list, errors_list)
+    """
+    if not channel_ids:
+        return [], []
+
+    from youtube.utils import get_youtube_client
+    youtube = get_youtube_client(api_key)
+    metadata_map = fetch_channels_metadata_from_api(youtube, channel_ids)
+
+    added_list = []
+    errors = []
+    now = datetime.now(timezone.utc)
+
+    for cid in channel_ids:
+        if cid in metadata_map:
+            meta = metadata_map[cid]
+            name = meta["name"] or "Unknown Channel"
+            handle = meta["handle"]
+            avatar_url = meta["thumbnail_url"]
+            description = meta["description"]
+            subscriber_count = meta["subscriber_count"]
+            video_count = meta["video_count"]
+
+            try:
+                existing_creator = db.query(Creator).filter(Creator.channel_id == cid).first()
+                if existing_creator:
+                    existing_creator.name = name
+                    existing_creator.handle = handle
+                    existing_creator.avatar_url = avatar_url
+                    existing_creator.description = description
+                    existing_creator.subscriber_count = subscriber_count
+                    existing_creator.video_count = video_count
+                    existing_creator.updated_at = now
+                else:
+                    new_creator = Creator(
+                        channel_id=cid,
+                        name=name,
+                        handle=handle,
+                        avatar_url=avatar_url,
+                        description=description,
+                        subscriber_count=subscriber_count,
+                        video_count=video_count,
+                        backfill_completed=False,
+                        last_synced_at=now,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    db.add(new_creator)
+
+                added_list.append({
+                    "channel_id": cid,
+                    "channel_name": name,
+                    "thumbnail_url": avatar_url,
+                    "video_count": video_count,
+                })
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Error persisting creator {cid} to database: {e}", exc_info=True)
+                errors.append({"channel_id": cid, "error": str(e)})
+        else:
+            errors.append({"channel_id": cid, "error": "Channel metadata could not be fetched from YouTube API."})
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error committing creators batch to database: {e}", exc_info=True)
+
+    return added_list, errors
