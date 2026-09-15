@@ -8,7 +8,7 @@ incremental database upserting, Shorts classification, and outlier score recalcu
 import os
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Union, Tuple, List, Set
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -42,6 +42,9 @@ logger = logging.getLogger("discover_api.youtube.fetch_videos.pipeline")
 # Incremental save threshold: commit to DB every N videos so quota errors don't lose work
 INCREMENTAL_SAVE_THRESHOLD = 500
 
+# Only fetch and keep videos from the last 12 months (365 days)
+VIDEO_HISTORY_DAYS = 365
+
 
 def _load_cached_channel_data(
     db: Session,
@@ -50,9 +53,14 @@ def _load_cached_channel_data(
 ) -> Tuple[List[Video], Set[str], Optional[CreatorModel], str, bool]:
     """
     Query existing cached videos and creator record from PostgreSQL.
+    Only returns videos published within the last VIDEO_HISTORY_DAYS (12 months).
     Returns (cached_videos, cached_ids, creator_record, channel_title, backfill_completed).
     """
-    db_videos = db.query(VideoModel).filter(VideoModel.channel_id == channel_id).order_by(VideoModel.published_at.desc()).all()
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=VIDEO_HISTORY_DAYS)
+    db_videos = db.query(VideoModel).filter(
+        VideoModel.channel_id == channel_id,
+        VideoModel.published_at >= cutoff_date,
+    ).order_by(VideoModel.published_at.desc()).all()
     creator_record = db.query(CreatorModel).filter(CreatorModel.channel_id == channel_id).first()
     channel_title = creator_record.name if creator_record else ""
     backfill_completed = (
@@ -238,9 +246,18 @@ def _fetch_and_enrich_playlist_videos(
                 raise
 
             items = response.get("items", [])
+            cutoff_date = now - timedelta(days=VIDEO_HISTORY_DAYS)
             page_vids = []
+            hit_cutoff = False
             for item in items:
                 vid = item["contentDetails"]["videoId"]
+                # Check if this video is older than the 12-month cutoff
+                published_str = item["contentDetails"].get("videoPublishedAt")
+                if published_str:
+                    published_dt = _parse_dt(published_str)
+                    if published_dt < cutoff_date:
+                        hit_cutoff = True
+                        break
                 if not fresh and backfill_completed and cached_ids and vid in cached_ids:
                     hit_cache = True
                     break
@@ -253,7 +270,7 @@ def _fetch_and_enrich_playlist_videos(
             if page_vids:
                 futures_list.append(executor.submit(_fetch_batch_ids, api_key, page_vids))
 
-            if hit_cache:
+            if hit_cache or hit_cutoff:
                 break
 
             if len(new_video_ids) // 500 > (len(new_video_ids) - len(items)) // 500:
@@ -265,6 +282,8 @@ def _fetch_and_enrich_playlist_videos(
             if not next_page_token:
                 break
 
+        if hit_cutoff:
+            logger.info(f"      Reached 12-month cutoff ({cutoff_date.date()}). Stopping API fetch.")
         if hit_cache:
             logger.info("      Found cached video ID in database. Stopping API fetch.")
         if quota_exceeded:
@@ -337,8 +356,13 @@ def _finalize_creator_and_outliers(
 def _get_final_channel_videos(db: Session, channel_id: str, channel_title: str) -> List[Video]:
     """
     Query complete list of videos from database for final return.
+    Only returns videos published within the last VIDEO_HISTORY_DAYS (12 months).
     """
-    db_all_videos = db.query(VideoModel).filter(VideoModel.channel_id == channel_id).order_by(VideoModel.published_at.desc()).all()
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=VIDEO_HISTORY_DAYS)
+    db_all_videos = db.query(VideoModel).filter(
+        VideoModel.channel_id == channel_id,
+        VideoModel.published_at >= cutoff_date,
+    ).order_by(VideoModel.published_at.desc()).all()
     return [db_to_video(v, channel_title) for v in db_all_videos]
 
 
